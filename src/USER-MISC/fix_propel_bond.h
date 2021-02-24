@@ -26,9 +26,8 @@ namespace LAMMPS_NS {
 
 class FixPropelBond : public Fix {
   enum ReversalMode {
-    NONE,
-    PERIODIC,
-    STOCHASTIC,
+    OFF,
+    ON
   };
 
  public:
@@ -45,7 +44,7 @@ class FixPropelBond : public Fix {
   double reversal_time;
   double reversal_prob;
   int nmolecules;
-  ReversalMode mode;
+  ReversalMode reversal_mode;
   
   int *apply_to_type;
   int *reverse;

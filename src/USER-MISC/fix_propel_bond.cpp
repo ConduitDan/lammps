@@ -12,29 +12,23 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing authors: Matthew S. E. Peterson (Brandeis University)
+   Contributing author: Matthew S. E. Peterson (Brandeis University)
 
-   Thanks to Abhijeet Joshi (Brandeis University)
+   Thanks to Stefan Paquay (Brandeis) and Abhijeet Joshi (Brandeis) for
+   implementation help and useful advice!
 ------------------------------------------------------------------------- */
 
 #include "fix_propel_bond.h"
 
 #include "atom.h"
+#include "comm.h"
 #include "error.h"
 #include "force.h"
-#include "lammps.h"
-#include "lmptype.h"
 #include "memory.h"
 #include "neighbor.h"
 #include "random_mars.h"
 #include "update.h"
 #include "utils.h"
-
-#include <cctype>
-#include <cmath>
-#include <cstring>
-#include <mpi.h>
-#include <string>
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
@@ -47,7 +41,7 @@ FixPropelBond::FixPropelBond(LAMMPS * lmp, int narg, char **argv)
   , reversal_time{0.0}
   , reversal_prob{0.0}
   , nmolecules{0}
-  , mode{NONE}
+  , reversal_mode{OFF}
   , apply_to_type{nullptr}
   , reverse{nullptr}
   , random{nullptr}
@@ -63,59 +57,65 @@ FixPropelBond::FixPropelBond(LAMMPS * lmp, int narg, char **argv)
 
   // handle optional arguments
   int iarg = 1;
-  std::string kw;
+  std::string kw, val;
   while (iarg < narg) {
     kw = argv[iarg++];
-
     if (kw == "reverse") {
+      reversal_mode = ON;
+      
       if (narg - iarg < 2) {
-        error->all(FLERR, "Illegal fix propel/bond command");
-      }
-
-      std::string modestr = argv[iarg++];
-      reversal_time = utils::numeric(FLERR, argv[iarg++], false, lmp);
-      if (modestr == "none") {
-        error->warning(FLERR, "fix propel/bond reversal time will be ignored");
-      } else if (modestr == "periodically") {
-        mode = PERIODIC;
-      } else if (modestr == "stochastically") {
-        mode = STOCHASTIC;
-      } else {
         error->all(
             FLERR,
-            fmt::format("Error in fix propel/bond - Invalid mode '{}'", modestr)
+            "Error in fix propel/bond - too few values for 'reverse' keyword"
         );
       }
-
-      if (mode != NONE && reversal_time <= 0.0) {
-        error->all(FLERR, "fix propel/bond reversal time must be positive");
+      
+      reversal_time = utils::numeric(FLERR, argv[iarg++], false, lmp);
+      if (reversal_time <= 0.0) {
+        error->all(
+            FLERR,
+            "Error in fix propel/bond - reversal time must be positive"
+        );
       }
-
+      
+      int seed = utils::inumeric(FLERR, argv[iarg++], false, lmp);
+      random = new RanMars(lmp, seed);
+    
     } else if (kw == "btypes") {
-      apply_to_type = new int[atom->nbondtypes + 1];
+      apply_to_type = memory->create(
+          apply_to_type, atom->nbondtypes + 1, "propel/bond:apply_to_type"
+      );
       std::memset(apply_to_type, 0, (atom->nbondtypes + 1)*sizeof(int));
       
       int ok = 0;
       int ilo, ihi;
-      while (++iarg < narg && (std::isdigit(argv[iarg][0]) || argv[iarg][0] == '*')) {
-        utils::bounds(FLERR, argv[iarg], 1, atom->nbondtypes, ilo, ihi, error);
+      while (iarg < narg) {
+        val = argv[iarg++];
+        if (!(std::isdigit(val[0]) || val[0] == '*')) {
+          ok = 0;
+          break;
+        }
+        
+        utils::bounds(FLERR, val, 1, atom->nbondtypes, ilo, ihi, error);
         for (int type = ilo; type <= ihi; ++type) {
           apply_to_type[type] = 1;
         }
+        
         ok = 1;
+        iarg++;
       }
 
       if (!ok) {
         error->all(
             FLERR,
-            "Error in fix propel/bond - "
-            "'btypes' keyword requires at least one type"
+            "Error in fix propel/bond - Invalid bond type in 'btypes' keyword"
         );
       }
+
     } else {
       error->all(
           FLERR,
-          fmt::format("Illegal argument '{}' for fix propel/bond", kw)
+          fmt::format("Error in fix propel/bond - Unknown keyword '{}'", kw)
       );
     }
   }
@@ -125,19 +125,18 @@ FixPropelBond::FixPropelBond(LAMMPS * lmp, int narg, char **argv)
 
 FixPropelBond::~FixPropelBond()
 {
-  if (apply_to_type) delete [] apply_to_type;
   if (random) delete random;
   memory->destroy(reverse);
+  memory->destroy(apply_to_type);
 }
 
 /* -------------------------------------------------------------------------- */
 
 void FixPropelBond::init()
 {
-  if (mode != NONE) {
+  if (reversal_mode == ON) {
     grow_reversal_list();
-    if (mode == PERIODIC) reversal_prob = 0.0;
-    else reversal_prob = update->dt / reversal_time;
+    reversal_prob = update->dt / reversal_time;
   }
 }
 
@@ -157,6 +156,7 @@ double FixPropelBond::memory_usage()
   double bytes = sizeof(FixPropelBond);
   if (apply_to_type) bytes += (atom->nbondtypes + 1.0) * sizeof(int);
   if (reverse) bytes += (nmolecules + 1.0) * sizeof(int);
+  if (random) bytes += sizeof(RanMars);
   return bytes;
 }
 
@@ -186,16 +186,15 @@ void FixPropelBond::pre_force(int /* vlag */)
     if (mask[i] & mask[j] & groupbit) {
       if (apply_to_type && !apply_to_type[type]) continue;
 
-      if (mode == NONE) {
-        sign = (i > j) - (i < j);
+      if (reversal_mode == OFF) {
+        // forces always point from atom with small to atom with large tag
+        sign = (atom->tag[i] > atom->tag[j]) ? 1 : -1;
       } else {
         mol = std::max(atom->molecule[i], atom->molecule[j]);
         if (mol > nmolecules) grow_reversal_list();
         sign = reverse[mol];
       }
 
-      // forces always point from atoms with smaller indices to those with larger
-      // indices
       dx = x[i][0] - x[j][0];
       dy = x[i][1] - x[j][1];
       dz = x[i][2] - x[j][2];
@@ -218,7 +217,7 @@ void FixPropelBond::pre_force(int /* vlag */)
     }
   }
 
-  if (mode != NONE) update_reversal_time();
+  if (reversal_mode == ON) update_reversal_time();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -227,18 +226,22 @@ void FixPropelBond::grow_reversal_list()
 {
   tagint max_molecule = 0;
   for (int i = 0; i < atom->nlocal; ++i) {
-    if (atom->molecule[i] > max_molecule) {
-      max_molecule = atom->molecule[i];
-    }
+    max_molecule = std::max(max_molecule, atom->molecule[i]);
   }
 
-  MPI_Allreduce(&max_molecule, MPI_IN_PLACE, 1, MPI_LMP_TAGINT, MPI_MAX, MPI_COMM_WORLD);
+  {
+    tagint max;
+    MPI_Allreduce(&max_molecule, &max, 1, MPI_LMP_TAGINT, MPI_MAX, MPI_COMM_WORLD);
+    max_molecule = max;
+  }
 
   if (max_molecule > nmolecules) {
     reverse = memory->grow(reverse, max_molecule + 1, "propel/bond:reverse");
-    for (int mol = nmolecules; mol <= max_molecule; ++mol) {
+    for (int mol = nmolecules + 1; mol <= max_molecule; ++mol) {
       reverse[mol] = 1;
     }
+    
+    if (nmolecules == 0) reverse[0] = 1;
     nmolecules = max_molecule;
   }
 }
@@ -247,17 +250,9 @@ void FixPropelBond::grow_reversal_list()
 
 void FixPropelBond::update_reversal_time()
 {
-  if (mode == PERIODIC) {
-    reversal_prob += update->dt;
-    if (reversal_prob >= reversal_time) {
-      reversal_prob -= reversal_time;
-      for (int i = 1; i <= nmolecules; ++i) {
-        if (random->uniform() <= reversal_prob) reverse[i] = -reverse[i];
-      }
-    }
-  } else if (mode == STOCHASTIC) {
-    for (int i = 1; i <= nmolecules; ++i) {
-      if (random->uniform() <= reversal_prob) reverse[i] = -reverse[i];
-    }
+  // reversal times are implicitly sampled from a geometric distribution, the
+  // discrete analog of the exponential distribution, since it is memoryless
+  for (int i = 1; i <= nmolecules; ++i) {
+    if (random->uniform() <= reversal_prob) reverse[i] = -reverse[i];
   }
 }
