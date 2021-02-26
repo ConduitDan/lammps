@@ -44,17 +44,30 @@ class FixPropelBond : public Fix {
   double reversal_time;
   double reversal_prob;
   int nmolecules;
+  int ncheck;
+  int nevery;
   ReversalMode reversal_mode;
   
-  int *apply_to_type;
+  int *btype_flag;
   int *reverse;
   class RanMars *random;
 
   void grow_reversal_list();
   void update_reversal_time();
+  void parse_keywords(int narg, char **argv);
 };
 
 } // namespace LAMMPS_NS
 
 #endif // LMP_FIX_ACTIVE_BOND_H
 #endif // FIX_CLASS
+
+/* ERROR/WARNING messages:
+
+E: Illegal ... command
+
+Self-explanatory.  Check the input script syntax and compare to the
+documentation for the command.  You can use -echo screen as a
+command-line option when running LAMMPS to see the offending line.
+
+*/
