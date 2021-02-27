@@ -23,6 +23,7 @@
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
+#include "fmt/core.h"
 #include "force.h"
 #include "memory.h"
 #include "neighbor.h"
@@ -119,19 +120,18 @@ void FixPropelBond::pre_force(int /* vlag */)
     type = bondlist[n][2];
 
     if (mask[i] & mask[j] & groupbit) {
-      if (reversal_mode == OFF) {
-        // forces always point from atom with small to atom with large tag
-        sign = (atom->tag[i] > atom->tag[j]) ? 1 : -1;
-      } else {
+      sign = (atom->tag[i] > atom->tag[j]) ? 1 : -1;
+      sign *= btype_flag[type];
+      
+      if (reversal_mode == ON) {
         mol = atom->molecule[i];
         if (mol == atom->molecule[j] && mol <= nmolecules) {
-          sign = reverse[mol];
+          sign *= reverse[mol];
         } else {
           sign = 0;
         }
       }
 
-      sign *= btype_flag[type];
       if (sign == 0) continue;
 
       dx = x[i][0] - x[j][0];
@@ -235,9 +235,13 @@ void FixPropelBond::parse_keywords(int narg, char **argv)
       btype_argv = argv + iarg;
       btype_narg = 0;
       while (iarg < narg) {
-        arg = argv[iarg++];
-        if (std::isdigit(arg[0]) || arg[0] == '*') btype_narg++;
-        else break;
+        arg = argv[iarg];
+        if (std::isdigit(arg[0]) || arg[0] == '*') {
+          iarg++;
+          btype_narg++;
+        } else {
+          break;
+        }
       }
     
     } else if (strcmp(arg, "flip") == 0) {
@@ -251,9 +255,13 @@ void FixPropelBond::parse_keywords(int narg, char **argv)
       flip_argv = argv + iarg;
       flip_narg = 0;
       while (iarg < narg) {
-        arg = argv[iarg++];
-        if (std::isdigit(arg[0]) || arg[0] == '*') flip_narg++;
-        else break;
+        arg = argv[iarg];
+        if (std::isdigit(arg[0]) || arg[0] == '*') {
+          iarg++;
+          flip_narg++;
+        } else {
+          break;
+        }
       }
 
     } else if (strcmp(arg, "reverses") == 0) {
@@ -266,7 +274,7 @@ void FixPropelBond::parse_keywords(int narg, char **argv)
 
       reverses_argv = argv + iarg;
       reverses_narg = 0;
-      if (iarg + 2 < narg) {
+      if (iarg + 2 <= narg) {
         iarg += 2;
         reverses_narg += 2;
       }
