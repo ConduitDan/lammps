@@ -1,0 +1,61 @@
+units lj
+dimension 2
+boundary p p p
+atom_style angle
+newton on
+
+comm_modify cutoff 3.25
+
+neighbor 1.0 bin
+neigh_modify every 1 delay 0 check yes
+
+variable seed equal 31415
+variable cutoff equal "2^(1.0/6.0)"
+
+region domain block -50 50 -50 50 -0.5 0.5
+create_box 1 domain &
+    bond/types 2 &
+    angle/types 1 &
+    extra/bond/per/atom 2 &
+    extra/angle/per/atom 3 &
+    extra/special/per/atom 6
+
+molecule square square.mol
+
+lattice hex 0.18
+create_atoms 0 box mol square ${seed}
+
+mass * 1.0
+
+bond_style harmonic
+bond_coeff * 1000 1.0
+
+angle_style harmonic
+angle_coeff * 1000 90
+
+fix integrator  all nve
+fix viscosity   all viscous 1.0
+fix propulsion  all propel/bond 10.0 flip 2
+fix plane       all enforce2d
+
+pair_style soft ${cutoff}
+pair_coeff * * 1000
+
+bond_style harmonic
+bond_coeff * 1000 1.0
+special_bonds fene
+
+minimize 1e-6 1e-6 1000 1000
+reset_timestep 0
+
+pair_style lj/cut ${cutoff}
+pair_coeff * * 1.0 1.0
+pair_modify shift yes
+
+dump 1 all custom 100 trajectory.dump &
+    id mol x y z vx vy vz fx fy fz
+
+timestep 1e-3
+
+thermo 1000
+run 20000
