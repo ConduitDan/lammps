@@ -382,6 +382,13 @@ void FixPropelBond::parse_keywords(int narg, char **argv)
       );
      }
 
+    if (reversal_mode == OFF) {
+      error->warning(FLERR,
+          "In fix propel/bond command"
+          " - 'check' keyword will be ignored as 'reverses' keyword is unused"
+      );
+    }
+
     nevery = utils::inumeric(FLERR, check_argv[0], false, lmp);
     ncheck = nevery;
     if (nevery < 0) {
