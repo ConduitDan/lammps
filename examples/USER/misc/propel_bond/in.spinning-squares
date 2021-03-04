@@ -35,7 +35,7 @@ angle_coeff * 1000 90
 
 fix integrator  all nve
 fix viscosity   all viscous 1.0
-fix propulsion  all propel/bond 10.0 flip 2
+fix propulsion  all propel/bond 10.0 flip 2 check 1
 fix plane       all enforce2d
 
 pair_style soft ${cutoff}
@@ -58,4 +58,4 @@ dump 1 all custom 100 trajectory.dump &
 timestep 1e-3
 
 thermo 1000
-run 20000
+run 5000
