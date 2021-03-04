@@ -72,9 +72,10 @@ on a per-molecule basis, and not per-bond. Thus, stochastic reversing cannot be
 enabled if the atom style does not support molecule identifiers.
 
 When the *check* keyword is, this fix will check for new molecules every
-*nevery* time steps. If the keyword isn't used, or if *nevery* is set to 0, then
-the fix will never check for new molecules. This keyword is only useful in
-conjunction with the *reverses* keyword.
+*nevery* time steps. This is useful in conjunction with other fixes that create
+molecules during a run, such as :doc:`fix deposit <fix_deposit>`. If the keyword
+isn't used, or if *nevery* is set to 0, then the fix will never check for new
+molecules. This keyword is ignored if the *reverses* keyword isn't used.
 
 .. note::
 

@@ -289,7 +289,10 @@ void FixPropelBond::parse_keywords(int narg, char **argv)
       
       check_argv = argv + iarg;
       check_narg = 0;
-      if (iarg++ < narg) check_narg++;
+      if (iarg + 1 <= narg) {
+        iarg++;
+        check_narg++;
+      }
 
     } else {
       error->all(FLERR, fmt::format(
@@ -379,7 +382,7 @@ void FixPropelBond::parse_keywords(int narg, char **argv)
       );
      }
 
-    nevery = utils::inumeric(FLERR, argv[iarg++], false, lmp);
+    nevery = utils::inumeric(FLERR, check_argv[0], false, lmp);
     ncheck = nevery;
     if (nevery < 0) {
       error->all(FLERR, 
