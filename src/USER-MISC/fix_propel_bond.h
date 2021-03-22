@@ -17,8 +17,8 @@ FixStyle(propel/bond, FixPropelBond)
 
 #else
 
-#ifndef LMP_FIX_ACTIVE_BOND_H
-#define LMP_FIX_ACTIVE_BOND_H
+#ifndef LMP_FIX_PROPEL_BOND_H
+#define LMP_FIX_PROPEL_BOND_H
 
 #include "fix.h"
 
@@ -59,7 +59,7 @@ class FixPropelBond : public Fix {
 
 } // namespace LAMMPS_NS
 
-#endif // LMP_FIX_ACTIVE_BOND_H
+#endif // LMP_FIX_PROPEL_BOND_H
 #endif // FIX_CLASS
 
 /* ERROR/WARNING messages:
