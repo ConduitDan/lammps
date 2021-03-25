@@ -26,7 +26,14 @@ find_package(Git)
 
 # by default, install into $HOME/.local (not /usr/local), so that no root access (and sudo!!) is needed
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.local" CACHE PATH "default install path" FORCE )
+  set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.local" CACHE PATH "Default install path" FORCE)
+endif()
+
+# If enabled, no need to use LD_LIBRARY_PATH / DYLD_LIBRARY_PATH when installed
+option(LAMMPS_INSTALL_RPATH "Set runtime path for shared libraries linked to LAMMPS binaries" OFF)
+if (LAMMPS_INSTALL_RPATH)
+  set(CMAKE_INSTALL_RPATH ${CMAKE_INSTALL_FULL_LIBDIR})
+  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
 endif()
 
 # Cmake modules/macros are in a subdirectory to keep this file cleaner
@@ -777,9 +784,7 @@ if(PKG_GPU)
   message(STATUS "<<< GPU package settings >>>
 -- GPU API:          ${GPU_API}")
   if(GPU_API STREQUAL "CUDA")
-    message(STATUS "GPU architecture: ${GPU_ARCH}")
-  elseif(GPU_API STREQUAL "OPENCL")
-    message(STATUS "OpenCL tuning:    ${OCL_TUNE}")
+    message(STATUS "GPU default architecture: ${GPU_ARCH}")
   elseif(GPU_API STREQUAL "HIP")
     message(STATUS "HIP platform:     ${HIP_PLATFORM}")
     message(STATUS "HIP architecture: ${HIP_ARCH}")
