@@ -30,15 +30,21 @@
 #include "lammps.h"
 #include "lmptype.h"
 #include "math_extra.h"
+#include "memory.h"
 #include "modify.h"
 #include "neighbor.h"
 #include "random_mars.h"
 #include "update.h"
 #include "utils.h"
 
+#define GROW_AMOUNT 4096
+
 #define ENABLE_DEBUGGING 1
 
-#define ERROR(...) \
+#define ERROR_ONE(...) \
+  error->one(FLERR, fmt::format(__VA_ARGS__))
+
+#define ERROR_ALL(...) \
   error->all(FLERR, fmt::format(__VA_ARGS__))
 
 #define ILLEGAL(...) \
@@ -50,7 +56,6 @@
 #define DEBUG(...)
 #endif
 
-
 /* ---------------------------------------------------------------------- */
 
 using namespace LAMMPS_NS;
@@ -59,17 +64,17 @@ using namespace FixConst;
 /* ---------------------------------------------------------------------- */
 
 struct FixFluidizeMesh::bond_type {
-  int atoms[2];
-  int index;
+  tagint atoms[2];
   int type;
+  int index;
 };
 
 /* ---------------------------------------------------------------------- */
 
 struct FixFluidizeMesh::dihedral_type {
-  int atoms[4];
-  int index;
+  tagint atoms[4];
   int type;
+  int index;
 };
 
 /* ---------------------------------------------------------------------- */
@@ -82,21 +87,12 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
     rmax{},
     kbt{}
 {
-  if (atom->molecular != Atom::MOLECULAR) {
-    ERROR("fix fluidize/mesh requires a molecular system");
-  }
-
-  if (!force->newton_bond) {
-    ERROR("fix fluidize/mesh requires 'newton on'");
-  }
-
   if (narg < 6 || narg > 8) {
     ILLEGAL("incorrect number of arguments");
   }
   arg += 3;
   narg -= 3;
 
-  // these two parameters set an effective viscosity
   nevery = utils::inumeric(FLERR, arg[0], false, lmp);
   if (nevery <= 0) {
     ILLEGAL("nevery must be positive");
@@ -125,13 +121,12 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
     }
   }
 
-  // lets us compute the system temperature
   auto id_temp = id + std::string("_temp");
   modify->add_compute(id_temp + " all temp");
   
   int i = modify->find_compute(id_temp);
   if (i < 0) {
-    ERROR("unable to compute system temperature");
+    ERROR_ALL("unable to compute system temperature");
   } else {
     temperature = modify->compute[i];
   }
@@ -155,13 +150,26 @@ int FixFluidizeMesh::setmask() {
 
 /* ---------------------------------------------------------------------- */
 
+void FixFluidizeMesh::init() {
+  if (atom->molecular != Atom::MOLECULAR) {
+    ERROR_ALL("fix fluidize/mesh requires a molecular system");
+  }
+
+  if (!force->newton_bond) {
+    ERROR_ALL("fix fluidize/mesh requires 'newton on'");
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
 void FixFluidizeMesh::post_integrate() {
   if (update->ntimestep % nevery != 0) return;
-  
+
   comm->forward_comm();
   kbt = force->boltz * temperature->compute_scalar();
 
-  int *mask = atom->mask;
+  bool skip;
+  int a, b, c, d;
   for (int i = 0; i < atom->nlocal; ++i) {
     if (!(atom->mask[i] & groupbit)) continue;
     for (int j = 0; j < atom->num_dihedral[i]; ++j) {
@@ -169,21 +177,22 @@ void FixFluidizeMesh::post_integrate() {
       if (atom->dihedral_atom2[i][j] != atom->tag[i]) continue;
       if (random->uniform() > swap_probability) continue;
 
-      int a = atom->map(atom->dihedral_atom1[i][j]);
-      int b = atom->map(atom->dihedral_atom2[i][j]);
-      int c = atom->map(atom->dihedral_atom3[i][j]);
-      int d = atom->map(atom->dihedral_atom4[i][j]);
+      a = atom->map(atom->dihedral_atom1[i][j]);
+      b = atom->map(atom->dihedral_atom2[i][j]);
+      c = atom->map(atom->dihedral_atom3[i][j]);
+      d = atom->map(atom->dihedral_atom4[i][j]);
 
-      int mask = atom->mask[i];
-      bool skip = false;
+      skip = false;
       for (int id : {a, b, c, d}) {
-        if (id < 0) ERROR("fix fluidize/mesh needs a larger communication cutoff!");
-        else if (id >= atom->nlocal) skip = true;
-        else mask &= atom->mask[id];
+        if (id < 0) ERROR_ONE("fix fluidize/mesh needs a larger communication cutoff!");
+        
+        if ((id >= atom->nlocal) || !(atom->mask[id] & groupbit)) {
+          skip = true;
+          break;
+        }
       }
 
-      if (skip || !(mask & groupbit)) continue;
-      else try_swap(a, b, c, d);
+      if (!skip) try_swap(a, b, c, d);
     }
   }
 }
@@ -206,7 +215,7 @@ void FixFluidizeMesh::try_swap(int a, int b, int c, int d) {
   bond_type new_bond = {a, d};
   if (!find_bond(old_bond) || find_bond(new_bond)) return;
   else new_bond.type = old_bond.type;
-  
+
   dihedral_type old_dihedral = {a, b, c, d};
   dihedral_type new_dihedral = {b, a, d, c};
   if (!find_dihedral(old_dihedral) || find_dihedral(new_dihedral)) return;
@@ -236,7 +245,7 @@ void FixFluidizeMesh::try_swap(int a, int b, int c, int d) {
     to_insert[i] = {a, b, c, d};
     to_insert[i].type = to_remove[i].type;
   }
-  
+
   for (int i = 0; i < 4; ++i) {
     swap_dihedrals(to_remove[i], to_insert[i]);
   }
@@ -263,9 +272,13 @@ bool FixFluidizeMesh::accept_change(bond_type old_bond, bond_type new_bond) {
     double f; // unused
     double rsq = dx*dx + dy*dy + dz*dz;
 
-    if (rmax > 0 && rsq >= rmax) {
-      return std::numeric_limits<double>::infinity();
-    } else return force->bond->single(bond.type, rsq, a, b, f);
+    double energy = 0.0;
+    if (force->bond) {
+      if (rmax > 0 && rsq >= rmax) energy += std::numeric_limits<double>::infinity();
+      else energy += force->bond->single(bond.type, rsq, a, b, f);
+    }
+
+    return energy;
   };
 
   double delta = compute_energy(new_bond) - compute_energy(old_bond);
@@ -306,7 +319,7 @@ void FixFluidizeMesh::remove_bond(bond_type bond) {
   tagint *bond_atom = atom->bond_atom[a];
   
   if (index < 0 || num_bonds == 0) {
-    ERROR("attempted to remove bond that does not exist");
+    ERROR_ONE("attempted to remove bond that does not exist");
   }
 
   num_bonds--;
@@ -329,7 +342,7 @@ void FixFluidizeMesh::insert_bond(bond_type bond) {
     atom->bond_type[a][num_bonds] = bond.type;
     num_bonds++;
   } else {
-    ERROR("No space for addition bonds - consider increasing extra/bond/per/atom");
+    ERROR_ONE("No space for addition bonds - consider increasing extra/bond/per/atom");
   }
 }
 
@@ -350,7 +363,7 @@ bool FixFluidizeMesh::find_dihedral(dihedral_type &dihedral) {
         dihedral.type = atom->dihedral_type[a][i];
         
         for (int id : dihedral.atoms) {
-          if (id < 0) ERROR("fix fluidize/mesh needs a larger communication cutoff!");
+          if (id < 0) ERROR_ONE("fix fluidize/mesh needs a larger communication cutoff!");
         }
         
         dihedral.index = i;
@@ -381,7 +394,7 @@ void FixFluidizeMesh::remove_dihedral(dihedral_type dihedral) {
   tagint *atom4 = atom->dihedral_atom4[datom];
   
   if (index < 0 || num_dihedral == 0 || index >= num_dihedral) {
-    ERROR("attempted to remove dihedral that does not exist");
+    ERROR_ONE("attempted to remove dihedral that does not exist");
   }
 
   num_dihedral--;
@@ -411,7 +424,7 @@ void FixFluidizeMesh::insert_dihedral(dihedral_type dihedral) {
     atom->dihedral_type[b][num_dihedral] = dihedral.type;
     num_dihedral++;
   } else {
-    ERROR("No space for addition dihedrals - consider increasing extra/dihedral/per/atom");
+    ERROR_ONE("No space for addition dihedrals - consider increasing extra/dihedral/per/atom");
   }
 }
 
@@ -457,6 +470,6 @@ int FixFluidizeMesh::find_exterior_atom(dihedral_type a, dihedral_type b) {
     if (!found) return i;
   }
 
-  ERROR("unable to find exterior atom");
+  ERROR_ONE("unable to find exterior atom");
   return -1;
 }

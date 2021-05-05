@@ -33,6 +33,7 @@ public:
   virtual ~FixFluidizeMesh();
 
   int setmask() override;
+  void init() override;
   void post_integrate() override;
 
 private:
