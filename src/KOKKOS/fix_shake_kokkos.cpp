@@ -1,6 +1,6 @@
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   http://lammps.sandia.gov, Sandia National Laboratories
+   https://lammps.sandia.gov/, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
@@ -156,7 +156,7 @@ void FixShakeKokkos<DeviceType>::init()
 {
   FixShake::init();
 
-  if (strstr(update->integrate_style,"respa"))
+  if (utils::strmatch(update->integrate_style,"^respa"))
     error->all(FLERR,"Cannot yet use respa with Kokkos");
 
   if (rattle)
@@ -285,8 +285,8 @@ void FixShakeKokkos<DeviceType>::pre_neighbor()
   nlist = h_nlist();
 
   if (h_error_flag() == 1) {
-    error->one(FLERR,fmt::format("Shake atoms missing on proc "
-                                 "{} at step {}",me,update->ntimestep));
+    error->one(FLERR,"Shake atoms missing on proc "
+                                 "{} at step {}",me,update->ntimestep);
   }
 }
 

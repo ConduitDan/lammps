@@ -75,8 +75,8 @@ FixTTM::FixTTM(LAMMPS *lmp, int narg, char **arg) :
     if (comm->me == 0) {
       fp = fopen(arg[15],"w");
       if (fp == nullptr)
-        error->one(FLERR,fmt::format("Cannot open output file {}: {}",
-                                     arg[15], utils::getsyserror()));
+        error->one(FLERR,"Cannot open output file {}: {}",
+                                     arg[15], utils::getsyserror());
     }
   }
 
@@ -207,7 +207,7 @@ void FixTTM::init()
       for (int iznode = 0; iznode < nznodes; iznode++)
         net_energy_transfer_all[ixnode][iynode][iznode] = 0;
 
-  if (strstr(update->integrate_style,"respa"))
+  if (utils::strmatch(update->integrate_style,"^respa"))
     nlevels_respa = ((Respa *) update->integrate)->nlevels;
 }
 
@@ -331,8 +331,8 @@ void FixTTM::read_initial_electron_temperatures(const char *filename)
 
   std::string name = utils::get_potential_file_path(filename);
   if (name.empty())
-    error->one(FLERR,fmt::format("Cannot open input file: {}",
-                                 filename));
+    error->one(FLERR,"Cannot open input file: {}",
+                                 filename);
   FILE *fpr = fopen(name.c_str(),"r");
 
   // read initial electron temperature values from file

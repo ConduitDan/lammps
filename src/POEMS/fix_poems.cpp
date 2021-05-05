@@ -277,8 +277,8 @@ FixPOEMS::FixPOEMS(LAMMPS *lmp, int narg, char **arg) :
   nsum -= njoint;
 
   if (me == 0)
-    utils::logmesg(lmp,fmt::format("{} clusters, {} bodies, {} joints, {} atoms\n",
-                                   ncluster,nbody,njoint,nsum));
+    utils::logmesg(lmp,"{} clusters, {} bodies, {} joints, {} atoms\n",
+                   ncluster,nbody,njoint,nsum);
 }
 
 /* ----------------------------------------------------------------------
@@ -389,7 +389,7 @@ void FixPOEMS::init()
 
   // rRESPA info
 
-  if (strstr(update->integrate_style,"respa")) {
+  if (utils::strmatch(update->integrate_style,"^respa")) {
     step_respa = ((Respa *) update->integrate)->step;
     nlevels_respa = ((Respa *) update->integrate)->nlevels;
   }
