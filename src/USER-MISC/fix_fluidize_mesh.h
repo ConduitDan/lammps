@@ -40,7 +40,8 @@ private:
   class RanMars *random;
   class Compute *temperature;
   double swap_probability;
-  double rmax;
+  double rmax2;
+  double rmin2;
   double kbt;
 
   bool accept_change(bond_type, bond_type);
