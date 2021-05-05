@@ -84,7 +84,8 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
     random(nullptr),
     temperature(nullptr),
     swap_probability{},
-    rmax{},
+    rmax2{},
+    rmin2{},
     kbt{}
 {
   if (narg < 6 || narg > 8) {
@@ -106,19 +107,35 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
   int seed = utils::inumeric(FLERR, arg[2], false, lmp);
   random = new RanMars(lmp, seed + comm->me);
 
-  if (narg > 3) {
-    if (strcmp(arg[3], "rmax") == 0) {
-      if (narg != 5) {
+  int iarg = 3;
+  while (iarg < narg) {
+    if (strcmp(arg[iarg], "rmax") == 0) {
+      if (iarg + 1 >= narg) {
         ILLEGAL("no value given to keyword 'rmax'");
       }
-      rmax = utils::numeric(FLERR, arg[4], false, lmp);
-      if (rmax < 0) {
-        ILLEGAL("value of 'rmax' cannot be negative");
+      double rmax = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      if (rmax2 <= 0) {
+        ILLEGAL("value of 'rmax' must be positive");
       }
-      rmax *= rmax;
+      rmax2 = rmax * rmax;
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "rmin") == 0) {
+      if (iarg + 1 >= narg) {
+        ILLEGAL("no value given to keyword 'rmin'");
+      }
+      double rmin = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      if (rmin <= 0) {
+        ILLEGAL("value of 'rmin' must be positive");
+      }
+      rmin2 = rmin * rmin;
+      iarg += 2;
     } else {
       ILLEGAL("unknown keyword '{}'", arg[3]);
     }
+  }
+
+  if ((rmin2 > 0 || rmax2 > 0) && (rmin2 >= rmax2)) {
+    ILLEGAL("Value of 'rmin' must be less than that of 'rmax'");
   }
 
   auto id_temp = id + std::string("_temp");
@@ -270,12 +287,15 @@ bool FixFluidizeMesh::accept_change(bond_type old_bond, bond_type new_bond) {
     domain->minimum_image(dx, dy, dz);
 
     double f; // unused
-    double rsq = dx*dx + dy*dy + dz*dz;
+    double r2 = dx*dx + dy*dy + dz*dz;
 
     double energy = 0.0;
     if (force->bond) {
-      if (rmax > 0 && rsq >= rmax) energy += std::numeric_limits<double>::infinity();
-      else energy += force->bond->single(bond.type, rsq, a, b, f);
+      if ((rmax2 > 0 && r2 > rmax2) || (rmin2 > 0 && r2 < rmin2)) {
+        energy += std::numeric_limits<double>::infinity();
+      } else {
+        energy += force->bond->single(bond.type, r2, a, b, f);
+      }
     }
 
     return energy;
