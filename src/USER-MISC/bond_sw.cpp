@@ -128,7 +128,7 @@ void BondStillingerWeber::compute(int eflag, int vflag)
 
       fbond -= u * (b * b + a) / r;
       if (eflag) {
-        eflag += u;
+        ebond += u;
       }
     }
 
