@@ -88,7 +88,7 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
     rmin2{},
     kbt{}
 {
-  if (narg < 6 || narg > 8) {
+  if (narg < 6 || narg > 10) {
     ILLEGAL("incorrect number of arguments");
   }
   arg += 3;
@@ -114,7 +114,7 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
         ILLEGAL("no value given to keyword 'rmax'");
       }
       double rmax = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
-      if (rmax2 <= 0) {
+      if (rmax <= 0) {
         ILLEGAL("value of 'rmax' must be positive");
       }
       rmax2 = rmax * rmax;
