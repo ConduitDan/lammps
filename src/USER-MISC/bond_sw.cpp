@@ -30,6 +30,8 @@
 
 #define ERROR_ALL(...) error->all(FLERR, fmt::format(__VA_ARGS__))
 #define ERROR_ONE(...) error->one(FLERR, fmt::format(__VA_ARGS__))
+#define WARN(...) error->warning(FLERR, fmt::format(__VA_ARGS__), 0)
+#define LOGWARN(...) error->warning(FLERR, fmt::format(__VA_ARGS__), 1)
 
 using namespace LAMMPS_NS;
 
@@ -89,7 +91,7 @@ void BondStillingerWeber::compute(int eflag, int vflag)
     dz = x[i1][2] - x[i2][2];
 
     r2 = dx*dx + dy*dy + dz*dz;
-    r = std::sqrt(r2) / sigma[type];
+    r = std::sqrt(r2);
 
     l0 = lmin[type];
     l3 = lmax[type];
@@ -98,17 +100,19 @@ void BondStillingerWeber::compute(int eflag, int vflag)
 
     if (r < l1) {
       if (r <= l0) {
-        ERROR_ONE("SW bond too short at step {}: {} ({}, {})",
-          update->ntimestep, atom->tag[i1], atom->tag[i2], r
+        LOGWARN("SW bond too short at step {}: {} ({}, {})",
+          update->ntimestep, r, atom->tag[i1], atom->tag[i2]
         );
+        if (r <= 0.5 * l0) ERROR_ONE("Bad SW bond");
+        else r = 0.95 * l0 + 0.05 * l1;
       }
       
-      a = 1.0 / (r - l0);
-      b = 1.0 / (r - l1);
+      a = sigma[type] / (r - l0);
+      b = sigma[type] / (r - l1);
       c = std::exp(b);
       u = k[type] * a * c;
 
-      fbond += u * (b * b + a) / r;
+      fbond += u * (b * b + a) / (sigma[type] * r);
       if (eflag) {
         ebond += u;
       }
@@ -116,17 +120,19 @@ void BondStillingerWeber::compute(int eflag, int vflag)
 
     if (r > l2) {
       if (r >= l3) {
-        ERROR_ONE("SW bond too long at step {}: {} ({}, {})",
-          update->ntimestep, atom->tag[i1], atom->tag[i2], r
+        LOGWARN("SW bond too long at step {}: {} ({}, {})",
+          update->ntimestep, r, atom->tag[i1], atom->tag[i2]
         );
+        if (r >= 2.0 * l3) ERROR_ONE("Bad SW bond");
+        else r = 0.95 * l3 + 0.05 * l2;
       }
       
-      a = 1.0 / (l3 - r);
-      b = 1.0 / (l2 - r);
+      a = sigma[type] / (l3 - r);
+      b = sigma[type] / (l2 - r);
       c = std::exp(b);
       u = k[type] * a * c;
 
-      fbond -= u * (b * b + a) / r;
+      fbond -= u * (b * b + a) / (sigma[type] * r);
       if (eflag) {
         ebond += u;
       }
@@ -171,7 +177,7 @@ void BondStillingerWeber::allocate()
 
 void BondStillingerWeber::coeff(int narg, char **arg)
 {
-  if (narg != 6) error->all(FLERR,"Incorrect args for bond coefficients");
+  if (narg != 5 && narg != 6) error->all(FLERR,"Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo,ihi;
@@ -181,7 +187,8 @@ void BondStillingerWeber::coeff(int narg, char **arg)
   double lmin_one = utils::numeric(FLERR,arg[2],false,lmp);
   double lmax_one = utils::numeric(FLERR,arg[3],false,lmp);
   double delta_one = utils::numeric(FLERR,arg[4],false,lmp);
-  double sigma_one = utils::numeric(FLERR,arg[5],false,lmp);
+  double sigma_one = 1.0;
+  if (narg == 6) sigma_one = utils::numeric(FLERR,arg[5],false,lmp);
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
@@ -273,7 +280,7 @@ double BondStillingerWeber::single(int type, double rsq, int /*i*/, int /*j*/,
 {
   double a, b, c, u;
 
-  double r = std::sqrt(r) / sigma[type];
+  double r = std::sqrt(rsq);
   double l0 = lmin[type];
   double l3 = lmax[type];
   double l1 = l0 + delta[type];
@@ -284,29 +291,33 @@ double BondStillingerWeber::single(int type, double rsq, int /*i*/, int /*j*/,
 
   if (r < l1) {
     if (r <= l0) {
-      ERROR_ONE("SW bond too short at step {}: {}", update->ntimestep, r);
-    }
+        WARN("SW bond too short at step {}: {}", update->ntimestep, r);
+        if (r <= 0.5 * l0) ERROR_ONE("Bad SW bond");
+        else r = 0.95 * l0 + 0.05 * l1;
+      }
     
-    a = 1.0 / (r - l0);
-    b = 1.0 / (r - l1);
+    a = sigma[type] / (r - l0);
+    b = sigma[type] / (r - l1);
     c = std::exp(b);
     u = k[type] * a * c;
 
-    fforce += u * (b * b + a) / r;
+    fforce += u * (b * b + a) / (sigma[type] * r);
     eng += u;
   }
 
   if (r > l2) {
     if (r >= l3) {
-      ERROR_ONE("SW bond too long at step {}: {}", update->ntimestep, r);
-    }
+        WARN("SW bond too long at step {}: {}", update->ntimestep, r);
+        if (r >= 2.0 * l3) ERROR_ONE("Bad SW bond");
+        else r = 0.95 * l3 + 0.05 * l2;
+      }
     
-    a = 1.0 / (l3 - r);
-    b = 1.0 / (l2 - r);
+    a = sigma[type] / (l3 - r);
+    b = sigma[type] / (l2 - r);
     c = std::exp(b);
     u = k[type] * a * c;
 
-    fforce -= u * (b * b + a) / r;
+    fforce -= u * (b * b + a) / (sigma[type] * r);
     eng += u;
   }
 
