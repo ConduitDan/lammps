@@ -65,28 +65,35 @@ using namespace FixConst;
 
 struct FixFluidizeMesh::bond_type {
   tagint atoms[2];
-  int type;
-  int index;
+  tagint type;
+  tagint index;
 };
 
 /* ---------------------------------------------------------------------- */
 
 struct FixFluidizeMesh::dihedral_type {
   tagint atoms[4];
-  int type;
-  int index;
+  tagint type;
+  tagint index;
 };
 
 /* ---------------------------------------------------------------------- */
 
 FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
     Fix(lmp, narg, arg),
-    random(nullptr),
+    random_one(nullptr),
+    random_all(nullptr),
     temperature(nullptr),
-    swap_probability{},
-    rmax2{},
-    rmin2{},
-    kbt{}
+    staged_swaps(nullptr),
+    staged_swaps_all(nullptr),
+    num_staged_swaps(0),
+    max_staged_swaps(0),
+    num_staged_swaps_all(0),
+    max_staged_swaps_all(0),
+    swap_probability(0.0),
+    rmax2(0),
+    rmin2(0),
+    kbt(0)
 {
   if (narg < 6 || narg > 10) {
     ILLEGAL("incorrect number of arguments");
@@ -105,7 +112,8 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
   }
 
   int seed = utils::inumeric(FLERR, arg[2], false, lmp);
-  random = new RanMars(lmp, seed + comm->me);
+  random_one = new RanMars(lmp, seed + comm->me);
+  random_all = new RanMars(lmp, seed + comm->nprocs);
 
   int iarg = 3;
   while (iarg < narg) {
@@ -147,14 +155,19 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
   } else {
     temperature = modify->compute[i];
   }
+
+  memory->create(staged_swaps, GROW_AMOUNT, "fix/fluidize/mesh:staged_swaps");
+  max_staged_swaps = GROW_AMOUNT; 
 }
 
 /* ---------------------------------------------------------------------- */
 
 FixFluidizeMesh::~FixFluidizeMesh()
 {
-  if (random) delete random;
+  if (random_one) delete random_one;
+  if (random_all) delete random_all;
   if (temperature) modify->delete_compute(temperature->id);
+  memory->destroy(staged_swaps);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -186,31 +199,93 @@ void FixFluidizeMesh::post_integrate() {
   kbt = force->boltz * temperature->compute_scalar();
 
   bool skip;
-  int a, b, c, d;
+  dihedral_type dihedral;
   for (int i = 0; i < atom->nlocal; ++i) {
     if (!(atom->mask[i] & groupbit)) continue;
     for (int j = 0; j < atom->num_dihedral[i]; ++j) {
       // atom2 is the canonical "owner" of the dihedral
       if (atom->dihedral_atom2[i][j] != atom->tag[i]) continue;
-      if (random->uniform() > swap_probability) continue;
+      if (random_one->uniform() > swap_probability) continue;
 
-      a = atom->map(atom->dihedral_atom1[i][j]);
-      b = atom->map(atom->dihedral_atom2[i][j]);
-      c = atom->map(atom->dihedral_atom3[i][j]);
-      d = atom->map(atom->dihedral_atom4[i][j]);
+      dihedral.atoms[0] = atom->dihedral_atom1[i][j];
+      dihedral.atoms[1] = atom->dihedral_atom2[i][j];
+      dihedral.atoms[2] = atom->dihedral_atom3[i][j];
+      dihedral.atoms[3] = atom->dihedral_atom4[i][j];
 
       skip = false;
-      for (int id : {a, b, c, d}) {
+      for (tagint tag : dihedral.atoms) {
+        int id = atom->map(tag);
         if (id < 0) ERROR_ONE("fix fluidize/mesh needs a larger communication cutoff!");
-        
-        if ((id >= atom->nlocal) || !(atom->mask[id] & groupbit)) {
-          skip = true;
-          break;
-        }
+        skip |= !(atom->mask[id] & groupbit);
       }
 
-      if (!skip) try_swap(a, b, c, d);
+      if (!skip) {
+        stage_swap(dihedral);
+      }
     }
+  }
+  
+  gather_swaps();
+  commit();
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixFluidizeMesh::stage_swap(dihedral_type dihedral) {
+  if (num_staged_swaps == max_staged_swaps) {
+    max_staged_swaps += GROW_AMOUNT;
+    memory->grow(staged_swaps, max_staged_swaps, "fix/fluidize/mesh:staged_swaps");
+  }
+
+  staged_swaps[num_staged_swaps++] = dihedral;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixFluidizeMesh::gather_swaps() {
+  // this is a scale factor to correct the fact that we are sending/receiving
+  // arrays of `dihedral_type` in the form of `tagint`s.
+  constexpr int dihedral_size = sizeof(dihedral_type) / sizeof(tagint);
+
+  auto *layout = new int[2 * comm->nprocs];
+  auto *counts = layout;
+  auto *displs = layout + comm->nprocs;
+  
+  MPI_Allgather(&num_staged_swaps, 1, MPI_INT, counts, 1, MPI_INT, MPI_COMM_WORLD);
+
+  displs[0] = 0;
+  counts[0] *= dihedral_size;
+  for (int i = 1; i < comm->nprocs; ++i) {
+    counts[i] *= dihedral_size;
+    displs[i] = (displs[i-1] + counts[i-1]);
+  }
+
+  num_staged_swaps_all = displs[comm->nprocs - 1] + counts[comm->nprocs - 1];
+  if (num_staged_swaps_all > max_staged_swaps_all) {
+    max_staged_swaps_all = GROW_AMOUNT * (1 + num_staged_swaps_all / GROW_AMOUNT);
+    memory->grow(staged_swaps_all, max_staged_swaps_all, "fix/fluidize/mesh:staged_swaps_all");
+  }
+  
+  int send_bytes = num_staged_swaps * dihedral_size;
+  MPI_Allgatherv(staged_swaps, send_bytes, MPI_LMP_TAGINT,
+                 staged_swaps_all, counts, displs, MPI_LMP_TAGINT, MPI_COMM_WORLD);
+
+  
+  delete[] layout;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixFluidizeMesh::commit() {
+  for (int i = 0; i < num_staged_swaps_all; ++i) {
+    auto dihedral = staged_swaps_all[i];
+
+    int a = atom->map(dihedral.atoms[0]);
+    int b = atom->map(dihedral.atoms[1]);
+    int c = atom->map(dihedral.atoms[2]);
+    int d = atom->map(dihedral.atoms[3]);
+
+    try_swap(a, b, c, d);
   }
 }
 
@@ -260,7 +335,6 @@ void FixFluidizeMesh::try_swap(int a, int b, int c, int d) {
     c = to_remove[i].atoms[2];
     d = interior_atoms[i];
     to_insert[i] = {a, b, c, d};
-    to_insert[i].type = to_remove[i].type;
   }
 
   for (int i = 0; i < 4; ++i) {
@@ -302,7 +376,9 @@ bool FixFluidizeMesh::accept_change(bond_type old_bond, bond_type new_bond) {
   };
 
   double delta = compute_energy(new_bond) - compute_energy(old_bond);
-  return (delta < 0) || (random->uniform() < std::exp(-delta / kbt));
+  double u = random_all->uniform();
+  
+  return (delta < 0) || (u < std::exp(-delta / kbt));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -471,6 +547,13 @@ void FixFluidizeMesh::swap_dihedrals(dihedral_type old_dihedral, dihedral_type n
   atom->dihedral_atom3[b][index] = atom->tag[c];
   atom->dihedral_atom4[b][index] = atom->tag[d];
   atom->dihedral_type[b][index] = type;
+}
+
+/* ---------------------------------------------------------------------- */
+
+bool FixFluidizeMesh::is_owned(dihedral_type dihedral) {
+  auto id = atom->map(dihedral.atoms[1]);
+  return 0 <= id && id < atom->nlocal;
 }
 
 /* ---------------------------------------------------------------------- */

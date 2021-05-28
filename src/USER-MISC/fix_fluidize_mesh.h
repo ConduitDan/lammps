@@ -37,12 +37,23 @@ public:
   void post_integrate() override;
 
 private:
-  class RanMars *random;
+  class RanMars *random_one;
+  class RanMars *random_all;
   class Compute *temperature;
+  dihedral_type *staged_swaps;
+  dihedral_type *staged_swaps_all;
+  int num_staged_swaps;
+  int max_staged_swaps;
+  int num_staged_swaps_all;
+  int max_staged_swaps_all;
   double swap_probability;
   double rmax2;
   double rmin2;
   double kbt;
+
+  void stage_swap(dihedral_type);
+  void gather_swaps();
+  void commit();
 
   bool accept_change(bond_type, bond_type);
   void try_swap(int, int, int, int);
@@ -56,7 +67,8 @@ private:
   void insert_dihedral(dihedral_type);
   void swap_dihedrals(dihedral_type, dihedral_type);
 
-  int find_exterior_atom(dihedral_type a, dihedral_type b);
+  bool is_owned(dihedral_type);
+  int find_exterior_atom(dihedral_type, dihedral_type);
 };
 
 } // namespace LAMMPS_NS
