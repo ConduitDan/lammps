@@ -37,8 +37,7 @@ public:
   void post_integrate() override;
 
 private:
-  class RanMars *random_one;
-  class RanMars *random_all;
+  class RanMars *random;
   class Compute *temperature;
   dihedral_type *staged_swaps;
   dihedral_type *staged_swaps_all;
@@ -58,12 +57,12 @@ private:
   bool accept_change(bond_type, bond_type);
   void try_swap(int, int, int, int);
 
-  bool find_bond(bond_type &);
-  void remove_bond(bond_type);
+  int find_bond(bond_type &);
+  void remove_bond_at(bond_type, int);
   void insert_bond(bond_type);
 
-  bool find_dihedral(dihedral_type &);
-  void remove_dihedral(dihedral_type);
+  int find_dihedral(dihedral_type &);
+  void remove_dihedral_at(dihedral_type, int);
   void insert_dihedral(dihedral_type);
   void swap_dihedrals(dihedral_type, dihedral_type);
 
@@ -76,13 +75,13 @@ private:
 #endif
 #endif
 
-    /*
-    ERROR/WARNING messages:
+/*
+   ERROR/WARNING messages:
 
-    E: Illegal ... command
+   E: Illegal ... command
 
-    Self-explanatory.  Check the input script syntax and compare to the
-    documentation for the command.  You can use -echo screen as a
-    command-line option when running LAMMPS to see the offending line.
+   Self-explanatory.  Check the input script syntax and compare to the
+   documentation for the command.  You can use -echo screen as a
+   command-line option when running LAMMPS to see the offending line.
 
-    */
+*/
