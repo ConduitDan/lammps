@@ -16,8 +16,10 @@ group dynamic id 26:600
 
 comm_modify cutoff 3.0
 
+print "test"
+
 pair_style lj/cut ${cutoff}
-pair_coeff * * ${lj} ${lj}
+pair_coeff * * 1.0 1.0 #${lj} ${lj}
 
 bond_style harmonic
 bond_coeff * ${k} ${cutoff}
@@ -27,6 +29,7 @@ bond_coeff * ${k} ${cutoff}
 
 dihedral_style harmonic
 dihedral_coeff * 0 1 1
+
 
 special_bonds lj 1 1 1
 

@@ -11,6 +11,8 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
+//Modified by LBF on 092622 to implement random integer generation
+
 #ifndef LMP_RANMARS_H
 #define LMP_RANMARS_H
 
@@ -24,6 +26,7 @@ class RanMars : protected Pointers {
   ~RanMars();
   double uniform();
   double gaussian();
+  int integer(int n);
   double gaussian(double mu, double sigma);
   double rayleigh(double sigma);
   double besselexp(double theta, double alpha, double cp);

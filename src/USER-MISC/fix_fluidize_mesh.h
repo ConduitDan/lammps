@@ -44,8 +44,14 @@ private:
   double rmin2;
   double kbt;
 
-  bool accept_change(bond_type, bond_type);
+  int n_accept=0;
+  int n_reject=0;
+
+  double compute_bending_energy(dihedral_type);
+  
+  bool accept_change(bond_type, bond_type, dihedral_type, dihedral_type, dihedral_type (&old_nbs)[4], dihedral_type (&new_nbs)[4]);
   void try_swap(int, int, int, int);
+  void print_p_acc();
 
   bool find_bond(bond_type &);
   void remove_bond(bond_type);

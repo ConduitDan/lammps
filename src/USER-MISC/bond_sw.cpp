@@ -211,6 +211,8 @@ void BondStillingerWeber::coeff(int narg, char **arg)
 void BondStillingerWeber::init_style()
 {
   // special bonds should be 0 1 1
+  //(exclude pair interactions between directly bonded atoms,
+  //but not between next-nearest and next-next-nearest neighbors.)
 
   if (force->special_lj[1] != 0.0 || force->special_lj[2] != 1.0 ||
       force->special_lj[3] != 1.0) {

@@ -11,6 +11,8 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
+//Modified by LBF on 092622 to implement random integer generation
+
 // Marsaglia random number generator
 // see RANMAR in F James, Comp Phys Comm, 60, 329 (1990)
 
@@ -92,6 +94,16 @@ double RanMars::uniform()
   uni -= c;
   if (uni < 0.0) uni += 1.0;
   return uni;
+}
+
+/* ----------------------------------------------------------------------
+   integer RN -- generate random int between 0 and n-1, inclusive
+------------------------------------------------------------------------- */
+
+int RanMars::integer(int n)
+{
+  double u = RanMars::uniform();
+  return (int)(u*n);
 }
 
 /* ----------------------------------------------------------------------

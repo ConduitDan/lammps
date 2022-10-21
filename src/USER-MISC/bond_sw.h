@@ -11,6 +11,16 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   This class implements the "Stillinger-Weber" potential used by Noguchi & Gompper, 2005:
+
+   U_bond(r) = k*sigma*exp(sigma/(lmax-delta-r))/(lmax-r), r > lmax-delta
+             = 0, r <= lmax-delta
+
+   U_rep(r) = k*sigma*exp(sigma/(r-lmin-delta))/(r-lmin), r < lmin + delta
+            = 0, r >= lmin + delta
+------------------------------------------------------------------------- */
+
 #ifdef BOND_CLASS
 
 BondStyle(sw,BondStillingerWeber)
@@ -57,7 +67,7 @@ class BondStillingerWeber : public Bond {
 
 W: FENE bond too long: %ld %d %d %g
 
-A FENE bond has stretched dangerously far.  It's interaction strength
+A FENE bond has stretched dangerously far.  Its interaction strength
 will be truncated to attempt to prevent the bond from blowing up.
 
 E: Bad FENE bond
