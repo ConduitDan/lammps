@@ -395,3 +395,7 @@ double Dihedral::memory_usage()
   bytes += (double)comm->nthreads*maxcvatom*9 * sizeof(double);
   return bytes;
 }
+
+double Dihedral::single(int, double){
+  return 0;
+}

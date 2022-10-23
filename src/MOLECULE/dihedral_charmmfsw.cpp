@@ -495,3 +495,6 @@ void DihedralCharmmfsw::write_data(FILE *fp)
     fprintf(fp,"%d %g %d %d %g\n",i,k[i],multiplicity[i],shift[i],weight[i]);
 }
 
+double DihedralCharmmfsw::single(int, double) {
+  return 0;
+}

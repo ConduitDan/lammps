@@ -47,3 +47,7 @@ void DihedralDeprecated::settings(int, char **)
   }
   error->all(FLERR,"This dihedral style is no longer available");
 }
+
+double DihedralDeprecated::single(int, double){
+  return 0;
+}

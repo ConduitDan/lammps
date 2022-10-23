@@ -343,3 +343,7 @@ void DihedralHelix::write_data(FILE *fp)
   for (int i = 1; i <= atom->ndihedraltypes; i++)
     fprintf(fp,"%d %g %g %g\n",i,aphi[i],bphi[i],cphi[i]);
 }
+
+double DihedralHelix::single(int, double) {
+  return 0;
+}

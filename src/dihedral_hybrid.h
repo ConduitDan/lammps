@@ -40,6 +40,8 @@ class DihedralHybrid : public Dihedral {
   void read_restart(FILE *);
   double memory_usage();
 
+  double single(int, double);
+
  private:
   int *map;                     // which style each dihedral type points to
 

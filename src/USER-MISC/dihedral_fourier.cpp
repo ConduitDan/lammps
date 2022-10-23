@@ -421,3 +421,6 @@ void DihedralFourier::write_data(FILE *fp)
   }
 }
 
+double DihedralFourier::single(int, double){
+  return 0;
+}

@@ -33,6 +33,7 @@ class DihedralMultiHarmonic : public Dihedral {
   void write_restart(FILE *);
   void read_restart(FILE *);
   void write_data(FILE *);
+  double single(int, double);
 
  protected:
   double *a1,*a2,*a3,*a4,*a5;

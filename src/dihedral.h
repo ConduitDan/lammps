@@ -55,6 +55,8 @@ class Dihedral : protected Pointers {
   virtual void write_data(FILE *) {}
   virtual double memory_usage();
 
+  virtual double single(int, double);
+
  protected:
   int suffix_flag;             // suffix compatibility flag
 

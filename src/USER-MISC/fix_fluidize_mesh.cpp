@@ -22,6 +22,7 @@
 
 #include "atom.h"
 #include "bond.h"
+#include "dihedral.h"
 #include "comm.h"
 #include "compute.h"
 #include "domain.h"
@@ -177,6 +178,10 @@ void FixFluidizeMesh::init() {
 
   if (!force->newton_bond) {
     ERROR_ALL("fix fluidize/mesh requires 'newton on'");
+  }
+
+  if(!utils::strmatch(force->dihedral_style,"^harmonic")) {
+    ERROR_ALL("fix fluidize/mesh requires harmonic dihedral style");
   }
 }
 
@@ -422,7 +427,8 @@ double FixFluidizeMesh::compute_bending_energy(dihedral_type dihedral) {
 
   //Returns the energy associated with the dihedral
   //TODO: don't we need to put in bending stiffness??
-  return (1 + costheta);
+  //return (1 + costheta);
+  return force->dihedral->single(dihedral.type, acos(costheta));
   
 }
 bool FixFluidizeMesh::accept_change(bond_type old_bond, bond_type new_bond, dihedral_type old_dihedral, dihedral_type new_dihedral, dihedral_type (&old_nbs)[4], dihedral_type (&new_nbs)[4]) {
@@ -458,9 +464,11 @@ bool FixFluidizeMesh::accept_change(bond_type old_bond, bond_type new_bond, dihe
     return energy;
   };
 
+  //Note that right now, this only works if the dihedrals are harmonic
   double energy_oldDihedrals = compute_bending_energy(old_dihedral);
   double energy_newDihedrals = compute_bending_energy(new_dihedral);
 
+  //Check whether this works if fewer than 4 neighboring triangles
   for (int i = 0; i < 4; ++i) {
     //std::cout<<"5. Swapping dihedral: "<<i<<std::endl;
     energy_oldDihedrals += compute_bending_energy(old_nbs[i]);

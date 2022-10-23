@@ -351,3 +351,7 @@ void DihedralCosineShiftExp::write_data(FILE *fp)
     fprintf(fp,"%d %g %g %g\n",i,umin[i],
             theta[i]*180.0/MathConst::MY_PI,a[i]);
 }
+
+double DihedralCosineShiftExp::single(int, double){
+  return 0;
+}

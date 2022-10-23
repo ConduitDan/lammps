@@ -355,3 +355,7 @@ void DihedralNHarmonic::write_data(FILE *fp)
   }
 
 }
+
+double DihedralNHarmonic::single(int, double){
+  return 0;
+}

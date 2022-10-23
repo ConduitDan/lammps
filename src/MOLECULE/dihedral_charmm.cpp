@@ -452,3 +452,6 @@ void DihedralCharmm::write_data(FILE *fp)
     fprintf(fp,"%d %g %d %d %g\n",i,k[i],multiplicity[i],shift[i],weight[i]);
 }
 
+double DihedralCharmm::single(int, double) {
+  return 0;
+}

@@ -346,3 +346,7 @@ void DihedralQuadratic::write_data(FILE *fp)
   for (int i = 1; i <= atom->ndihedraltypes; i++)
     fprintf(fp,"%d %g %g \n",i,k[i],phi0[i]*180.0/MY_PI);
 }
+
+double DihedralQuadratic::single(int, double){
+  return 0;
+}

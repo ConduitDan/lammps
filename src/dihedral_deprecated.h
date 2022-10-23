@@ -34,6 +34,7 @@ class DihedralDeprecated : public Dihedral {
   virtual void coeff(int, char **) {}
   virtual void write_restart(FILE *) {}
   virtual void read_restart(FILE *) {}
+  virtual double single(int, double);
 };
 
 }

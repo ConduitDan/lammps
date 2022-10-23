@@ -33,6 +33,7 @@ class DihedralOPLS : public Dihedral {
   void write_restart(FILE *);
   virtual void read_restart(FILE *);
   void write_data(FILE *);
+  double single(int, double);
 
  protected:
   double *k1,*k2,*k3,*k4;

@@ -1311,4 +1311,6 @@ void DihedralTable::bcast_table(Table *tb)
   //MPI_Bcast(&tb->theta0,1,MPI_DOUBLE,0,world);
 }
 
-
+double DihedralTable::single(int, double){
+  return 0;
+}

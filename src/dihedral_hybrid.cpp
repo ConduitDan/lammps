@@ -362,3 +362,7 @@ double DihedralHybrid::memory_usage()
     if (styles[m]) bytes += styles[m]->memory_usage();
   return bytes;
 }
+
+double DihedralHybrid::single(int, double){
+  return 0;
+}
