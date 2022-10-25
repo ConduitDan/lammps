@@ -19,6 +19,8 @@
 
    U_rep(r) = k*sigma*exp(sigma/(r-lmin-delta))/(r-lmin), r < lmin + delta
             = 0, r >= lmin + delta
+
+   It is intended to be used with pair_style sw, which implements repulsion between non-bonded pairs of atoms.
 ------------------------------------------------------------------------- */
 
 #ifdef BOND_CLASS
