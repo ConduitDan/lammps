@@ -36,7 +36,6 @@ PairStillingerWeber::PairStillingerWeber(LAMMPS *lmp) : Pair(lmp)
 {
   writedata = 1;
 }
-
 /* ---------------------------------------------------------------------- */
 
 PairStillingerWeber::~PairStillingerWeber()
@@ -44,6 +43,7 @@ PairStillingerWeber::~PairStillingerWeber()
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(cut);
+    memory->destroy(cutsq);
 
     memory->destroy(k);
     memory->destroy(lmin);
@@ -154,6 +154,7 @@ void PairStillingerWeber::allocate()
     for (int j = i; j <= n; j++)
       setflag[i][j] = 0;
 
+  memory->create(cutsq,n+1,n+1,"pair:cutsq");
   memory->create(cut,n+1,n+1,"pair:cut");
   memory->create(k,n+1,n+1,"pair:k");
   memory->create(lmin,n+1,n+1,"pair:lmin");
