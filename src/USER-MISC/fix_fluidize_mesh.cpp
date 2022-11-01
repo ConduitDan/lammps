@@ -225,18 +225,21 @@ void FixFluidizeMesh::post_integrate() {
     int j=-1;
     int dihedral_cnt=0;
     for (int i_det = 0; i_det < atom->nlocal; ++i_det) {
+      //std::cout << "i : " << i_det << std::endl;
       if (!(atom->mask[i_det] & groupbit)) continue;
       if(atom->num_dihedral[i_det]==0) continue;
-      for (int j_det = 0; j_det < atom->num_dihedral[i_det]; ++j){
+      for (int j_det = 0; j_det < atom->num_dihedral[i_det]; ++j_det){
+        //std::cout << "j: " << j_det << std::endl;
         if (atom->dihedral_atom2[i_det][j_det] != atom->tag[i_det]) continue;
-        if(dihedral_cnt==atom->ndihedrals){
+        if(dihedral_cnt==index){
           i = i_det;
           j = j_det;
-          break;
+          //std::cout << "i: " << i << " j: " << std::endl;
         }
         dihedral_cnt++;
       }
     }
+    //std::cout << "index " << index << " i: " << i << " j: " << j << std::endl;
     //int i = dihedral_map[index].first;
     //int j = dihedral_map[index].second;
 
