@@ -197,77 +197,80 @@ void FixFluidizeMesh::post_integrate() {
   bool skip;
   int a, b, c, d;
 
-
-
   //one sweep = ndihedrals attempts to flip bonds
   
   //std::cout << "Num dihedrals: " << atom->ndihedrals << std::endl;
-  /*
-  for (int nattempt=0; nattempt<atom->ndihedrals; nattempt++) {
-    int index = random->integer(atom->ndihedrals);
-    int atom_arr[atom->ndihedrals]; //make sure to destruct these
-    int dihedral_arr[atom->ndihedrals];
-    int cnt = 0;
-    for(int i=0; i<atom->nlocal; i++) {
-      if (!(atom->mask[i] & groupbit)) continue;
-      int nd = atom->num_dihedral[i];
-      for(int j=0; j<nd; j++) {
-        if(atom->tag[i] != atom->dihedral_atom2[i][j]) continue;
-        atom_arr[cnt] = i;
-        dihedral_arr[cnt] = j;
-        cnt ++;
-      }
+
+  int cnt = 0;
+  while(cnt<atom->ndihedrals){
+    //Choose a dihedral at random; i = [0, ndihedral - 1]
+    //Map dihedrals to atom and dihedral index
+    /*
+  std::map<int, std::pair<int, int>> dihedral_map;
+ 
+  int dihedral_cnt=0;
+  for (int i_det = 0; i_det < atom->nlocal; ++i_det) {
+    if (!(atom->mask[i_det] & groupbit)) continue;
+    if(atom->num_dihedral[i_det]==0) continue;
+    for (int j = 0; j < atom->num_dihedral[i_det]; ++j){
+      if (atom->dihedral_atom2[i_det][j] != atom->tag[i_det]) continue;
+      dihedral_map[dihedral_cnt] = {i_det, j};
+      dihedral_cnt++;
     }
-    
-    for(int i=0; i<atom->ndihedrals; i++) {
-      std::cout << "index: " << i << " atom: " << atom_arr[i] << " dihedral: " << dihedral_arr[i] << std::endl;     
-    }
-    std::cout << "index: " << index << " atom: " << atom_arr[index] << " dihedral: " << dihedral_arr[index] << std::endl;
-    exit(0);
   }
   */
- 
-  for (int i_det = 0; i_det < atom->nlocal; ++i_det) {
-    //Choose an index at random; i_random = [0, atom->nlocal - 1]
-    int i = std::rand() % atom->nlocal;
+    int index = random->integer(atom->ndihedrals);
     
-    if (!(atom->mask[i] & groupbit)) continue; //fix this
-    
-    for (int j = 0; j < atom->num_dihedral[i]; ++j) {
-      // Select a particular dihedral at random say, j_random = [0, atom->num_dihedral[i_random] - 1]- Remove the loop
-      
-      
-      // atom2 is the canonical "owner" of the dihedral
-
-      if (atom->dihedral_atom2[i][j] != atom->tag[i]) continue;
-      if (random->uniform() > swap_probability) continue;
-
-      a = atom->map(atom->dihedral_atom1[i][j]);
-      b = atom->map(atom->dihedral_atom2[i][j]);
-      c = atom->map(atom->dihedral_atom3[i][j]);
-      d = atom->map(atom->dihedral_atom4[i][j]);
-
-      skip = false;
-      for (int id : {a, b, c, d}) {
-        if (id < 0) ERROR_ONE("fix fluidize/mesh needs a larger communication cutoff!");
-        
-        if ((id >= atom->nlocal) || !(atom->mask[id] & groupbit)) {
-          skip = true;
+    int i=-1;
+    int j=-1;
+    int dihedral_cnt=0;
+    for (int i_det = 0; i_det < atom->nlocal; ++i_det) {
+      if (!(atom->mask[i_det] & groupbit)) continue;
+      if(atom->num_dihedral[i_det]==0) continue;
+      for (int j_det = 0; j_det < atom->num_dihedral[i_det]; ++j){
+        if (atom->dihedral_atom2[i_det][j_det] != atom->tag[i_det]) continue;
+        if(dihedral_cnt==atom->ndihedrals){
+          i = i_det;
+          j = j_det;
           break;
         }
-      }
-
-      //std::cout<<a<<", "<<b<<", "<<c<<", "<<d<<std::endl;
-      //if (!skip) try_swap(a, b, c, d);
-      if (!skip) {
-        //std::cout<<"1. trying swap "<<a<<" "<<b<<" "<<c<<" "<<d<<std::endl;
-        try_swap(a, b, c, d);
-      }
-        else
-      {
-          //std::cout<<"1. skipped"<<std::endl;
+        dihedral_cnt++;
       }
     }
+    //int i = dihedral_map[index].first;
+    //int j = dihedral_map[index].second;
+
+    if (random->uniform() > swap_probability){
+      cnt ++;
+      continue;
+    }  //This is like an attempt frequency -- sets overall rate
+
+    a = atom->map(atom->dihedral_atom1[i][j]);
+    b = atom->map(atom->dihedral_atom2[i][j]);
+    c = atom->map(atom->dihedral_atom3[i][j]);
+    d = atom->map(atom->dihedral_atom4[i][j]);
+
+    skip = false;
+    for (int id : {a, b, c, d}) {
+      if (id < 0) ERROR_ONE("fix fluidize/mesh needs a larger communication cutoff!");
+        
+      if ((id >= atom->nlocal) || !(atom->mask[id] & groupbit)) {
+        skip = true;
+        break;
+      }
+    }
+
+    //std::cout<<a<<", "<<b<<", "<<c<<", "<<d<<std::endl;
+    //if (!skip) try_swap(a, b, c, d);
+    if (!skip) {
+      //std::cout<<"1. trying swap "<<a<<" "<<b<<" "<<c<<" "<<d<<std::endl;
+      try_swap(a, b, c, d);
+    }
+    else {
+      //std::cout<<"1. skipped"<<std::endl;
+    }
+    
+    cnt += 1;
   }
 }
 
@@ -353,6 +356,21 @@ void FixFluidizeMesh::try_swap(int a, int b, int c, int d) {
   remove_bond(old_bond);
   insert_bond(new_bond);
 
+  //Check that new bond has acceptable length
+  int a1 = new_bond.atoms[0];
+  int b1 = new_bond.atoms[1];
+  double dx = atom->x[b1][0] - atom->x[a1][0];
+  double dy = atom->x[b1][1] - atom->x[a1][1];
+  double dz = atom->x[b1][2] - atom->x[a1][2];
+  domain->minimum_image(dx, dy, dz);
+  double r2 = dx*dx + dy*dy + dz*dz;
+  if (r2 < rmin2) {
+    std::cout << "Error: accepted bond too short!" << std::endl;
+  }
+  if (r2 > rmax2) {
+    std::cout << "Error: accepted bond too long!" << std::endl;
+  }
+
   next_reneighbor = update->ntimestep;
 
 
@@ -426,8 +444,6 @@ double FixFluidizeMesh::compute_bending_energy(dihedral_type dihedral) {
   double costheta = N1_x*N2_x + N1_y*N2_y + N1_z*N2_z;
 
   //Returns the energy associated with the dihedral
-  //TODO: don't we need to put in bending stiffness??
-  //return (1 + costheta);
   return force->dihedral->single(dihedral.type, acos(costheta));
   
 }
@@ -451,6 +467,7 @@ bool FixFluidizeMesh::accept_change(bond_type old_bond, bond_type new_bond, dihe
       if ((rmax2 > 0 && r2 > rmax2) || (rmin2 > 0 && r2 < rmin2))
         {
           //std::cout<<"4. Condition2 not Met - Inf "<<std::endl;
+          //std::cout << "Proposed dihedral swap bond energy too high: bond length = " << sqrt(r2) << std::endl;
           energy += std::numeric_limits<double>::infinity();
         }
             else
@@ -477,7 +494,30 @@ bool FixFluidizeMesh::accept_change(bond_type old_bond, bond_type new_bond, dihe
 
   double delta = compute_bond_energy(new_bond) + energy_newDihedrals - compute_bond_energy(old_bond) - energy_oldDihedrals;
   //std::cout<<"4. Energy difference in bonds: "<<delta<<std::endl;
-  return (delta < 0) || (random->uniform() < std::exp(-delta / kbt));
+
+  //Check length of new bond
+  int a = new_bond.atoms[0];
+  int b = new_bond.atoms[1];
+  double dx = atom->x[b][0] - atom->x[a][0];
+  double dy = atom->x[b][1] - atom->x[a][1];
+  double dz = atom->x[b][2] - atom->x[a][2];
+  domain->minimum_image(dx, dy, dz);
+  double r2 = dx*dx + dy*dy + dz*dz;
+
+  if (random->uniform() < std::exp(-delta / kbt)) {
+    if (r2 < rmin2) {
+      std::cout << "Error: accepted bond too short!" << std::endl;
+    }
+    if (r2 > rmax2) {
+      std::cout << "Error: accepted bond too long!" << std::endl;
+    }
+    return true;
+  }
+  else {
+    return false;
+  }
+
+  //return (delta < 0) || (random->uniform() < std::exp(-delta / kbt));
 }
 
 /* ---------------------------------------------------------------------- */

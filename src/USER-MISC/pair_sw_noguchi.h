@@ -24,7 +24,7 @@
 
 #ifdef PAIR_CLASS
 
-PairStyle(sw,PairStillingerWeber)
+PairStyle(sw_noguchi,PairStillingerWeber)
 
 #else
 

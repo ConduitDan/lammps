@@ -11,7 +11,7 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "pair_sw.h"
+#include "pair_sw_noguchi.h"
 
 #include <cmath>
 #include <cstring>
@@ -199,7 +199,7 @@ void PairStillingerWeber::coeff(int narg, char **arg)
   double lmin_one = utils::numeric(FLERR,arg[3],false,lmp);
   double delta_one = utils::numeric(FLERR,arg[4],false,lmp);
   double sigma_one = 1.0;
-  if (narg == 5) sigma_one = utils::numeric(FLERR,arg[5],false,lmp);
+  if (narg == 6) sigma_one = utils::numeric(FLERR,arg[5],false,lmp);
 
   double cut_one = cut_global;
 
