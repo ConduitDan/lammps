@@ -219,6 +219,7 @@ void FixFluidizeMesh::post_integrate() {
     }
   }
   */
+    //For now, do this in an inefficient way -- just loop through atoms until you find the atom + dihedral indices corresponding to the randomly selected index for the dihedral list
     int index = random->integer(atom->ndihedrals);
     
     int i=-1;
@@ -243,10 +244,11 @@ void FixFluidizeMesh::post_integrate() {
     //int i = dihedral_map[index].first;
     //int j = dihedral_map[index].second;
 
+    //This is like an attempt frequency -- sets overall rate
     if (random->uniform() > swap_probability){
       cnt ++;
       continue;
-    }  //This is like an attempt frequency -- sets overall rate
+    }  
 
     a = atom->map(atom->dihedral_atom1[i][j]);
     b = atom->map(atom->dihedral_atom2[i][j]);
@@ -263,6 +265,7 @@ void FixFluidizeMesh::post_integrate() {
       }
     }
 
+    //Make an attempt to flip the bond
     //std::cout<<a<<", "<<b<<", "<<c<<", "<<d<<std::endl;
     //if (!skip) try_swap(a, b, c, d);
     if (!skip) {
