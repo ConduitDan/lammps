@@ -16,15 +16,25 @@
 
    Based on an initial implementation by Cong Qiao @ Brandeis.
    Thanks to Stefan Paquay @ Brandeis for help!
+
+   Refactored and somewhat rewritten by Danny Hellstein @ Brandeis University
+   Added interal datastuctures to keep track of dihedrals to reduce execution
+time from N^2 -> N
 ------------------------------------------------------------------------- */
 
 #include "fix_fluidize_mesh.h"
 
+#include <math.h>
+#include <stdlib.h>
+
+#include <cmath>
+#include <iostream>
+
 #include "atom.h"
 #include "bond.h"
-#include "dihedral.h"
 #include "comm.h"
 #include "compute.h"
+#include "dihedral.h"
 #include "domain.h"
 #include "error.h"
 #include "force.h"
@@ -37,22 +47,17 @@
 #include "random_mars.h"
 #include "update.h"
 #include "utils.h"
-#include <iostream>
-#include <stdlib.h>
-#include <cmath>
-#include <math.h>
 #define GROW_AMOUNT 4096
 
 #define ENABLE_DEBUGGING 1
 
-#define ERROR_ONE(...) \
-  error->one(FLERR, fmt::format(__VA_ARGS__))
+#define ERROR_ONE(...) error->one(FLERR, fmt::format(__VA_ARGS__))
 
-#define ERROR_ALL(...) \
-  error->all(FLERR, fmt::format(__VA_ARGS__))
+#define ERROR_ALL(...) error->all(FLERR, fmt::format(__VA_ARGS__))
 
 #define ILLEGAL(...) \
-  error->all(FLERR, fmt::format("Illegal fix fluidize/mesh command - " __VA_ARGS__))
+  error->all(FLERR,  \
+             fmt::format("Illegal fix fluidize/mesh command - " __VA_ARGS__))
 
 #if defined(ENABLE_DEBUGGING) && ENABLE_DEBUGGING == 1
 #define DEBUG(...) fmt::print(__VA_ARGS__)
@@ -83,15 +88,14 @@ struct FixFluidizeMesh::dihedral_type {
 
 /* ---------------------------------------------------------------------- */
 
-FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
-    Fix(lmp, narg, arg),
-    random(nullptr),
-    temperature(nullptr),
-    swap_probability{},
-    rmax2{},
-    rmin2{},
-    kbt{}
-{
+FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg)
+    : Fix(lmp, narg, arg),
+      random(nullptr),
+      temperature(nullptr),
+      swap_probability{},
+      rmax2{},
+      rmin2{},
+      kbt{} {
   if (narg < 6 || narg > 10) {
     ILLEGAL("incorrect number of arguments");
   }
@@ -144,7 +148,7 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
 
   auto id_temp = id + std::string("_temp");
   modify->add_compute(id_temp + " all temp");
-  
+
   int i = modify->find_compute(id_temp);
   if (i < 0) {
     ERROR_ALL("unable to compute system temperature");
@@ -155,8 +159,7 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixFluidizeMesh::~FixFluidizeMesh()
-{
+FixFluidizeMesh::~FixFluidizeMesh() {
   if (random) delete random;
   if (temperature) modify->delete_compute(temperature->id);
 }
@@ -180,7 +183,7 @@ void FixFluidizeMesh::init() {
     ERROR_ALL("fix fluidize/mesh requires 'newton on'");
   }
 
-  if(!utils::strmatch(force->dihedral_style,"^harmonic")) {
+  if (!utils::strmatch(force->dihedral_style, "^harmonic")) {
     ERROR_ALL("fix fluidize/mesh requires harmonic dihedral style");
   }
 }
@@ -197,86 +200,71 @@ void FixFluidizeMesh::post_integrate() {
   bool skip;
   int a, b, c, d;
 
-  //one sweep = ndihedrals attempts to flip bonds
-  
-  //std::cout << "Num dihedrals: " << atom->ndihedrals << std::endl;
+  // construct a list of dihedrals and a corrsponding map from atom to all the
+  // dihedrals it owns. this allows us random access into the full list of
+  // dihedrals.
+  int i = -1;
+  int j = -1;
+  int dihedral_cnt = 0;
+  _atomToDihedral.resize(atom->natoms);
+  for (auto &atom_it : _atomToDihedral) atom_it.clear();
+  _dihedralList.resize(atom->ndihedrals);
+  for (int i_det = 0; i_det < atom->nlocal; ++i_det) {  // for each atom
+    if (!(atom->mask[i_det] & groupbit))
+      continue;  // if this fix doesn't apply to this type of atom
 
-  int cnt = 0;
-  while(cnt<atom->ndihedrals){
-    //Choose a dihedral at random; i = [0, ndihedral - 1]
-    //Map dihedrals to atom and dihedral index
-    /*
-  std::map<int, std::pair<int, int>> dihedral_map;
- 
-  int dihedral_cnt=0;
-  for (int i_det = 0; i_det < atom->nlocal; ++i_det) {
-    if (!(atom->mask[i_det] & groupbit)) continue;
-    if(atom->num_dihedral[i_det]==0) continue;
-    for (int j = 0; j < atom->num_dihedral[i_det]; ++j){
-      if (atom->dihedral_atom2[i_det][j] != atom->tag[i_det]) continue;
-      dihedral_map[dihedral_cnt] = {i_det, j};
+    if (atom->num_dihedral[i_det] == 0)
+      continue;  // if this atom doesn't have dihedrals continue
+
+    for (int j_det = 0; j_det < atom->num_dihedral[i_det];
+         ++j_det) {  // for each dihedral on atom i_det
+      if (atom->dihedral_atom2[i_det][j_det] != atom->tag[i_det])
+        continue;  // I guess check if this diheardal exists?
+      if (dihedral_cnt >= atom->ndihedrals)
+        ERROR_ALL("double counting dihedrals");
+      a = atom->map(atom->dihedral_atom1[i_det][j_det]);
+      b = atom->map(atom->dihedral_atom2[i_det][j_det]);
+      c = atom->map(atom->dihedral_atom3[i_det][j_det]);
+      d = atom->map(atom->dihedral_atom4[i_det][j_det]);
+      _dihedralList[dihedral_cnt] = {a, b, c, d};
+      _dihedralList[dihedral_cnt].type = atom->dihedral_type[b][j_det];
+      _dihedralList[dihedral_cnt].index = j_det;
+
+      _atomToDihedral[b].insert(&_dihedralList[dihedral_cnt]);
+
       dihedral_cnt++;
     }
   }
-  */
-    //For now, do this in an inefficient way -- just loop through atoms until you find the atom + dihedral indices corresponding to the randomly selected index for the dihedral list
+
+  // one sweep = ndihedrals attempts to flip bonds
+  for (int count = 0; count < atom->ndihedrals; count++) {
+    // Choose a dihedral at random; i = [0, ndihedral - 1]
     int index = random->integer(atom->ndihedrals);
-    
-    int i=-1;
-    int j=-1;
-    int dihedral_cnt=0;
-    for (int i_det = 0; i_det < atom->nlocal; ++i_det) {
-      //std::cout << "i : " << i_det << std::endl;
-      if (!(atom->mask[i_det] & groupbit)) continue;
-      if(atom->num_dihedral[i_det]==0) continue;
-      for (int j_det = 0; j_det < atom->num_dihedral[i_det]; ++j_det){
-        //std::cout << "j: " << j_det << std::endl;
-        if (atom->dihedral_atom2[i_det][j_det] != atom->tag[i_det]) continue;
-        if(dihedral_cnt==index){
-          i = i_det;
-          j = j_det;
-          //std::cout << "i: " << i << " j: " << std::endl;
-        }
-        dihedral_cnt++;
-      }
-    }
-    //std::cout << "index " << index << " i: " << i << " j: " << j << std::endl;
-    //int i = dihedral_map[index].first;
-    //int j = dihedral_map[index].second;
 
-    //This is like an attempt frequency -- sets overall rate
-    if (random->uniform() > swap_probability){
-      cnt ++;
+    // This is like an attempt frequency -- sets overall rate
+    if (random->uniform() > swap_probability) {
       continue;
-    }  
+    }
 
-    a = atom->map(atom->dihedral_atom1[i][j]);
-    b = atom->map(atom->dihedral_atom2[i][j]);
-    c = atom->map(atom->dihedral_atom3[i][j]);
-    d = atom->map(atom->dihedral_atom4[i][j]);
+    a = _dihedralList[index].atoms[0];
+    b = _dihedralList[index].atoms[1];
+    c = _dihedralList[index].atoms[2];
+    d = _dihedralList[index].atoms[3];
 
     skip = false;
     for (int id : {a, b, c, d}) {
-      if (id < 0) ERROR_ONE("fix fluidize/mesh needs a larger communication cutoff!");
-        
+      if (id < 0)
+        ERROR_ONE("fix fluidize/mesh needs a larger communication cutoff!");
+
       if ((id >= atom->nlocal) || !(atom->mask[id] & groupbit)) {
         skip = true;
         break;
       }
     }
-
-    //Make an attempt to flip the bond
-    //std::cout<<a<<", "<<b<<", "<<c<<", "<<d<<std::endl;
-    //if (!skip) try_swap(a, b, c, d);
+    // Make an attempt to flip the bond
     if (!skip) {
-      //std::cout<<"1. trying swap "<<a<<" "<<b<<" "<<c<<" "<<d<<std::endl;
-      try_swap(a, b, c, d);
+      try_swap(_dihedralList[index]);
     }
-    else {
-      //std::cout<<"1. skipped"<<std::endl;
-    }
-    
-    cnt += 1;
   }
 }
 
@@ -289,110 +277,215 @@ void FixFluidizeMesh::post_integrate() {
 //  b---c    -->    b | c
 //     /              |/
 //    d               d
+// this transform implies
+//    a        a
+//   /          \  
+//  b---c =  b---c
+//     /      \    
+//    d        d
 //
-// That is, given an initially ordered dihedral {a, b, c, d}, it transforms
-// into {b, a, d, c} by swapping the central bond ({b, c} -> {a, d}). This also
-// requires updating the dihedrals that contain atoms within this dihedral.
-void FixFluidizeMesh::try_swap(int a, int b, int c, int d) {
+// i.e. that {a b c d} is an equivalent dihedral to {a c b d}. We also need to
+// modify the 4 dihedrals attached to this one
+//
+//  alpha ---- a ---- beta    alpha ---- a ---- beta
+//       \    / \    /             \    /|\    /
+//        \  1   2  /               \  1 | 2  /
+//         \/     \/                 \/  |  \/
+//          b -0- c       ===>        b  0  c
+//         /\     /\                 /\  |  /\       
+//        /  3   4  \               /  3 | 4  \      
+//       /    \ /    \             /    \|/    \     
+//  gamma ---- d ---- delta   gamma ---- d ---- delta
+//
+// alpha beta gamma and delta label the atoms exterior to this dihedral that
+// must participate in this rearrangement 0 1 2 3 4 label the dihedrals that are
+// modified when dihedral 0 is flipped
+//
+// we do not persevere any notion of handedness or parody in a dihedral, we find
+// external dihedrals by center lines (or their reverse). This is why atom 1 (of
+// {0,1,2,3}) 'owns' the dihedral
+
+void FixFluidizeMesh::swap_dihedral(dihedral_type &dihedral) {
+  // Performs all the actions to make a dihedral swap;
+  tagint a, b, c, d;
+  tagint *atoms = dihedral.atoms;
+  a = atoms[0];
+  b = atoms[1];
+  c = atoms[2];
+  d = atoms[3];
+
+  // find the exterior dihedrals by their center bonds
+  dihedral_type *exteriorDihedral1 = find_dihedral({b, a});
+  dihedral_type *exteriorDihedral2 = find_dihedral({a, c});
+  dihedral_type *exteriorDihedral3 = find_dihedral({c, d});
+  dihedral_type *exteriorDihedral4 = find_dihedral({d, b});
+  if (!(exteriorDihedral1 && exteriorDihedral2 && exteriorDihedral3 &&
+        exteriorDihedral4))
+    ERROR_ONE("couldn't find exterior dihedral while swapping back");
+  // flip the central dihedral
+  flip_central_dihedral(dihedral);
+
+  // swap the appropriate atoms in the exterior dihedrals
+  swap_atoms_in_dihedral(*exteriorDihedral1, c, d);
+  swap_atoms_in_dihedral(*exteriorDihedral2, b, d);
+  swap_atoms_in_dihedral(*exteriorDihedral3, b, a);
+  swap_atoms_in_dihedral(*exteriorDihedral4, c, a);
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixFluidizeMesh::swap_dihedral_calc_E(dihedral_type &dihedral) {
+  // swaps a dihedral and returns the change in energy
+  tagint a, b, c, d;
+  tagint *atoms = dihedral.atoms;
+  a = atoms[0];
+  b = atoms[1];
+  c = atoms[2];
+  d = atoms[3];
+  // find the exterior dihedrals by their center bonds
+  dihedral_type *exteriorDihedral1 = find_dihedral({b, a});
+  dihedral_type *exteriorDihedral2 = find_dihedral({a, c});
+  dihedral_type *exteriorDihedral3 = find_dihedral({c, d});
+  dihedral_type *exteriorDihedral4 = find_dihedral({d, b});
+  if (!(exteriorDihedral1 && exteriorDihedral2 && exteriorDihedral3 &&
+        exteriorDihedral4))
+    ERROR_ONE("couldn't find exterior dihedral");
+
+  // flip the central dihedral
+  // find the inital energy of the dihedral
+  double deltaE = -compute_bending_energy(dihedral);
+
+  // find the inital energy of the bond
+  bond_type centralBond = {b, c};
+  find_bond(centralBond);
+  deltaE -= compute_bond_energy(centralBond);
+
+  // flip the central bond update the bond and dihedral
+  flip_central_dihedral(dihedral);
+
+  // find the new bond energy
+  centralBond = {a, d};
+  find_bond(centralBond);
+  deltaE += compute_bond_energy(centralBond);
+
+  // calculate the new dihedral energy
+  deltaE += compute_bending_energy(dihedral);
+
+  // swap the appropriate atoms in the exterior dihedrals
+
+  // compute their inital bending energy
+  deltaE -= compute_bending_energy(*exteriorDihedral1);
+  deltaE -= compute_bending_energy(*exteriorDihedral2);
+  deltaE -= compute_bending_energy(*exteriorDihedral3);
+  deltaE -= compute_bending_energy(*exteriorDihedral4);
+
+  // make the subsitutions marked in the comment block above
+  swap_atoms_in_dihedral(*exteriorDihedral1, c, d);
+  swap_atoms_in_dihedral(*exteriorDihedral2, b, d);
+  swap_atoms_in_dihedral(*exteriorDihedral3, b, a);
+  swap_atoms_in_dihedral(*exteriorDihedral4, c, a);
+
+  // compute the final energy
+  deltaE += compute_bending_energy(*exteriorDihedral1);
+  deltaE += compute_bending_energy(*exteriorDihedral2);
+  deltaE += compute_bending_energy(*exteriorDihedral3);
+  deltaE += compute_bending_energy(*exteriorDihedral4);
+
+  return deltaE;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixFluidizeMesh::flip_central_dihedral(dihedral_type &dihedral) {
+  // flips the central bond of this dihedral and update the dihedral
+  tagint a, b, c, d;
+  a = dihedral.atoms[0];
+  b = dihedral.atoms[1];
+  c = dihedral.atoms[2];
+  d = dihedral.atoms[3];
+
+  // flip the bond
+  flip_central_bond(dihedral);
+  // remove the dihedral;
+  remove_dihedral(dihedral);
+  // swap the atoms
+  dihedral.atoms[0] = b;
+  dihedral.atoms[1] = a;
+  dihedral.atoms[2] = d;
+  dihedral.atoms[3] = c;
+
+  // add the dihedral;
+  insert_dihedral(dihedral);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixFluidizeMesh::flip_central_bond(dihedral_type dihedral) {
+  // flips the bond of a dihedral
+  tagint a, b, c, d;
+  a = dihedral.atoms[0];
+  b = dihedral.atoms[1];
+  c = dihedral.atoms[2];
+  d = dihedral.atoms[3];
   bond_type old_bond = {b, c};
   bond_type new_bond = {a, d};
-  if (!find_bond(old_bond) || find_bond(new_bond)){
-    std::cout << "Error: could not find bonds to swap! (in try_swap)" << std::endl;
-    return;
-  } 
-  else new_bond.type = old_bond.type;
-  //std::cout<<"2. Bond found "<<find_bond(old_bond)<<" "<<find_bond(new_bond)<<std::endl;
-
-  dihedral_type old_dihedral = {a, b, c, d};
-  dihedral_type new_dihedral = {b, a, d, c};
-  if (!find_dihedral(old_dihedral) || find_dihedral(new_dihedral)){
-    std::cout << "Error: could not find dihedrals to swap! (in try_swap)" << std::endl;
+  if (!find_bond(old_bond) || find_bond(new_bond)) {
+    std::cout << "Error: could not find bonds to swap! (in try_swap)"
+              << std::endl;
     return;
   }
-  else new_dihedral.type = old_dihedral.type;
-  //std::cout<<"3. Dihedral found "<<find_dihedral(old_dihedral)<<" "<<find_dihedral(new_dihedral)<<std::endl;
-
-  dihedral_type to_insert[4];
-  dihedral_type to_remove[] = {
-    {-1, a, b, -1},
-    {-1, c, d, -1},
-    {-1, a, c, -1},
-    {-1, b, d, -1},
-  };
-  //std::cout<<"5. Swapping: - "<<std::endl;
-  int interior_atoms[] = {d, a, d, a};
-  int exterior_atom;
-  //this apparently does not work when there is only one dihedral
-  for (int i = 0; i < 4; ++i) {
-    if (!find_dihedral(to_remove[i])){
-      std::cout << "Error: could not find dihedral to remove!" << std::endl;
-      return;
-    } 
-    //std::cout<<"5. dihedral found "<<i<<std::endl;
-
-    exterior_atom = find_exterior_atom(to_remove[i], old_dihedral);
-    //std::cout<<"5. Exterior atom found: "<<exterior_atom<<std::endl;
-    if (exterior_atom < 0){
-      std::cout << "Error: could not find exterior atom!" << std::endl;
-      return;
-    } 
-    a = exterior_atom;
-    b = to_remove[i].atoms[1];
-    c = to_remove[i].atoms[2];
-    d = interior_atoms[i];
-    //std::cout<<"5. New dihedral: "<<a<<" "<<b<<" "<<c<<" "<<d<<" "<<std::endl;
-    to_insert[i] = {a, b, c, d};
-    to_insert[i].type = to_remove[i].type;
-  }
-
-  if (!accept_change(old_bond, new_bond, old_dihedral, new_dihedral, to_insert, to_remove)) {
-    //std::cout<<"4. Bond change rejected"<<std::endl;
-    n_reject++;
-    return;
-  }
-  n_accept++;
-  //std::cout << "Swapping bond\n";
-  
-  for (int i = 0; i < 4; ++i) {
-    //std::cout<<"5. Swapping dihedral: "<<i<<std::endl;
-    swap_dihedrals(to_remove[i], to_insert[i]);    
-  }
-  swap_dihedrals(old_dihedral, new_dihedral);
-  
+  new_bond.type = old_bond.type;
   remove_bond(old_bond);
   insert_bond(new_bond);
+}
 
-  //Check that new bond has acceptable length
-  int a1 = new_bond.atoms[0];
-  int b1 = new_bond.atoms[1];
+/* ---------------------------------------------------------------------- */
+
+void FixFluidizeMesh::check_bond_length(bond_type bond) {
+  // Check that new bond has acceptable length
+  int a1 = bond.atoms[0];
+  int b1 = bond.atoms[1];
   double dx = atom->x[b1][0] - atom->x[a1][0];
   double dy = atom->x[b1][1] - atom->x[a1][1];
   double dz = atom->x[b1][2] - atom->x[a1][2];
   domain->minimum_image(dx, dy, dz);
-  double r2 = dx*dx + dy*dy + dz*dz;
+  double r2 = dx * dx + dy * dy + dz * dz;
   if (r2 < rmin2) {
     std::cout << "Error: accepted bond too short!" << std::endl;
   }
   if (r2 > rmax2) {
     std::cout << "Error: accepted bond too long!" << std::endl;
   }
+}
 
+/* ---------------------------------------------------------------------- */
+
+void FixFluidizeMesh::try_swap(dihedral_type &dihedral) {
+  // make the swap and calculate the change of energy
+  double deltaE = swap_dihedral_calc_E(dihedral);
+  // check acceptance based on energy change
+  if (!accept_change(deltaE)) {
+    // if we reject swap back (no need to calculate energy here)
+    swap_dihedral(dihedral);
+    n_reject++;
+    return;
+  }
+  n_accept++;
   next_reneighbor = update->ntimestep;
-
-
-/* ---------------------------------------------------------------------- */}
-//print acceptance probability
-
+}
+/* ---------------------------------------------------------------------- */
+// print acceptance probability
 void FixFluidizeMesh::print_p_acc() {
   std::cout << "No. swaps accepted: " << n_accept << std::endl;
   std::cout << "No. swaps rejected: " << n_reject << std::endl;
-  std::cout << "Acceptance ratio: " << (1.0*n_accept)/(n_accept + n_reject) << std::endl;
+  std::cout << "Acceptance ratio: " << (1.0 * n_accept) / (n_accept + n_reject)
+            << std::endl;
 }
 
 /* ---------------------------------------------------------------------- */
 
 double FixFluidizeMesh::compute_bending_energy(dihedral_type dihedral) {
-  //Get positions of atoms in dihedral. Note: b and c are bonded atoms.
+  // Get positions of atoms in dihedral. Note: b and c are bonded atoms.
   int a = dihedral.atoms[0];
   int b = dihedral.atoms[1];
   int c = dihedral.atoms[2];
@@ -414,7 +507,8 @@ double FixFluidizeMesh::compute_bending_energy(dihedral_type dihedral) {
   double yd = atom->x[d][1];
   double zd = atom->x[d][2];
 
-  //Calculate angle theta which is the angle bw the two planes made by {a,c,b} and {b,c,d}
+  // Calculate angle theta which is the angle bw the two planes made by
+  // {a,c,b} and {b,c,d}
 
   double dx_cb = xc - xb;
   double dy_cb = yc - yb;
@@ -436,94 +530,57 @@ double FixFluidizeMesh::compute_bending_energy(dihedral_type dihedral) {
   double N2_y = (-dz_cb * dx_ab) - (-dx_cb * dz_ab);
   double N2_z = (-dx_cb * dy_ab) - (-dy_cb * dx_ab);
 
-  double norm_N1 = std::sqrt(N1_x*N1_x + N1_y*N1_y + N1_z*N1_z);
-  double norm_N2 = std::sqrt(N2_x*N2_x + N2_y*N2_y + N2_z*N2_z);
+  double norm_N1 = std::sqrt(N1_x * N1_x + N1_y * N1_y + N1_z * N1_z);
+  double norm_N2 = std::sqrt(N2_x * N2_x + N2_y * N2_y + N2_z * N2_z);
 
-  N1_x = N1_x/norm_N1;
-  N1_y = N1_y/norm_N1;
-  N1_z = N1_z/norm_N1;
+  N1_x = N1_x / norm_N1;
+  N1_y = N1_y / norm_N1;
+  N1_z = N1_z / norm_N1;
 
-  N2_x = N2_x/norm_N2;
-  N2_y = N2_y/norm_N2;
-  N2_z = N2_z/norm_N2;
-  
-  double costheta = N1_x*N2_x + N1_y*N2_y + N1_z*N2_z;
+  N2_x = N2_x / norm_N2;
+  N2_y = N2_y / norm_N2;
+  N2_z = N2_z / norm_N2;
 
-  //Returns the energy associated with the dihedral
+  double costheta = N1_x * N2_x + N1_y * N2_y + N1_z * N2_z;
+
+  // Returns the energy associated with the dihedral
   return force->dihedral->single(dihedral.type, acos(costheta));
-  
 }
-bool FixFluidizeMesh::accept_change(bond_type old_bond, bond_type new_bond, dihedral_type old_dihedral, dihedral_type new_dihedral, dihedral_type (&old_nbs)[4], dihedral_type (&new_nbs)[4]) {
-  auto compute_bond_energy = [&](bond_type bond) {
-    int a = bond.atoms[0];
-    int b = bond.atoms[1];
 
-    double dx = atom->x[b][0] - atom->x[a][0];
-    double dy = atom->x[b][1] - atom->x[a][1];
-    double dz = atom->x[b][2] - atom->x[a][2];
-    domain->minimum_image(dx, dy, dz);
+/* ---------------------------------------------------------------------- */
 
-    double f; // unused
-    double r2 = dx*dx + dy*dy + dz*dz;
-    //std::cout<<"4. bond length: "<<r2<<std::endl;
+double FixFluidizeMesh::compute_bond_energy(bond_type bond) {
+  int a = bond.atoms[0];
+  int b = bond.atoms[1];
 
-    double energy = 0.0;
-    if (force->bond) {
-      //std::cout<<"4. Condition1 Met :"<<force->bond<<std::endl;
-      if ((rmax2 > 0 && r2 > rmax2) || (rmin2 > 0 && r2 < rmin2))
-        {
-          //std::cout<<"4. Condition2 not Met - Inf "<<std::endl;
-          //std::cout << "Proposed dihedral swap bond energy too high: bond length = " << sqrt(r2) << std::endl;
-          energy += std::numeric_limits<double>::infinity();
-        }
-            else
-        {
-          energy += force->bond->single(bond.type, r2, a, b, f);
-          //std::cout<<"3. Condition2 Met: "<<energy<<std::endl;
-        }
-    }
-
-    //std::cout<<"4. Energy: "<<energy<<std::endl;
-    return energy;
-  };
-
-  //Note that right now, this only works if the dihedrals are harmonic
-  double energy_oldDihedrals = compute_bending_energy(old_dihedral);
-  double energy_newDihedrals = compute_bending_energy(new_dihedral);
-
-  //Check whether this works if fewer than 4 neighboring triangles
-  for (int i = 0; i < 4; ++i) {
-    //std::cout<<"5. Swapping dihedral: "<<i<<std::endl;
-    energy_oldDihedrals += compute_bending_energy(old_nbs[i]);
-    energy_newDihedrals += compute_bending_energy(new_nbs[i]);
-  }
-
-  double delta = compute_bond_energy(new_bond) + energy_newDihedrals - compute_bond_energy(old_bond) - energy_oldDihedrals;
-  //std::cout<<"4. Energy difference in bonds: "<<delta<<std::endl;
-
-  //Check length of new bond
-  int a = new_bond.atoms[0];
-  int b = new_bond.atoms[1];
   double dx = atom->x[b][0] - atom->x[a][0];
   double dy = atom->x[b][1] - atom->x[a][1];
   double dz = atom->x[b][2] - atom->x[a][2];
   domain->minimum_image(dx, dy, dz);
-  double r2 = dx*dx + dy*dy + dz*dz;
 
-  if (random->uniform() < std::exp(-delta / kbt)) {
-    if (r2 < rmin2) {
-      std::cout << "Error: accepted bond too short!" << std::endl;
+  double f;  // unused
+  double r2 = dx * dx + dy * dy + dz * dz;
+
+  double energy = 0.0;
+  if (force->bond) {
+    if ((rmax2 > 0 && r2 > rmax2) || (rmin2 > 0 && r2 < rmin2)) {
+      energy += std::numeric_limits<double>::infinity();
+    } else {
+      energy += force->bond->single(bond.type, r2, a, b, f);
     }
-    if (r2 > rmax2) {
-      std::cout << "Error: accepted bond too long!" << std::endl;
-    }
-    return true;
   }
-  else {
+
+  return energy;
+}
+
+/* ---------------------------------------------------------------------- */
+
+bool FixFluidizeMesh::accept_change(double deltaE) {
+  if (random->uniform() < std::exp(-deltaE / kbt)) {
+    return true;
+  } else {
     return false;
   }
-
-  //return (delta < 0) || (random->uniform() < std::exp(-delta / kbt));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -558,7 +615,7 @@ void FixFluidizeMesh::remove_bond(bond_type bond) {
   int &num_bonds = atom->num_bond[a];
   int *bond_type = atom->bond_type[a];
   tagint *bond_atom = atom->bond_atom[a];
-  
+
   if (index < 0 || num_bonds == 0) {
     ERROR_ONE("attempted to remove bond that does not exist");
   }
@@ -583,76 +640,100 @@ void FixFluidizeMesh::insert_bond(bond_type bond) {
     atom->bond_type[a][num_bonds] = bond.type;
     num_bonds++;
   } else {
-    ERROR_ONE("No space for addition bonds - consider increasing extra/bond/per/atom");
+    ERROR_ONE(
+        "No space for addition bonds - consider increasing "
+        "extra/bond/per/atom");
   }
 }
 
 /* ---------------------------------------------------------------------- */
 
-bool FixFluidizeMesh::find_dihedral(dihedral_type &dihedral) {
-  auto find = [&](int a, int b) {
-    int num_dihedral = atom->num_dihedral[a];
-    int *dtype = atom->dihedral_type[a];
-    
-    for (int i = 0; i < num_dihedral; ++i) {
-      if (atom->dihedral_atom2[a][i] == atom->tag[a] && 
-          atom->dihedral_atom3[a][i] == atom->tag[b])
-	{
-	  dihedral.atoms[0] = atom->map(atom->dihedral_atom1[a][i]);
-	  dihedral.atoms[1] = atom->map(atom->dihedral_atom2[a][i]);
-	  dihedral.atoms[2] = atom->map(atom->dihedral_atom3[a][i]);
-	  dihedral.atoms[3] = atom->map(atom->dihedral_atom4[a][i]);
-	  dihedral.type = atom->dihedral_type[a][i];
-	  
-	  for (int id : dihedral.atoms) {
-	    if (id < 0) ERROR_ONE("fix fluidize/mesh needs a larger communication cutoff!");
-	  }
-	  
-	  dihedral.index = i;
-	  return true;
-	}
+FixFluidizeMesh::dihedral_type *FixFluidizeMesh::find_dihedral(
+    bond_type central_bond) {
+  auto find = [&](int b, int c) {
+    // this is a function that returns a bool if it finds the dihedral
+    // given two atoms a and b
+
+    // get the iterator to the set of dihedrals in a
+    for (auto &candidateDihedral : _atomToDihedral[b]) {
+      // consider it found if the center bond is the same
+      if (b == candidateDihedral->atoms[1] &&
+          c == candidateDihedral->atoms[2]) {
+        return candidateDihedral;
+      }
     }
-
-    dihedral.index = -1;
-    return false;
+    return (dihedral_type *)nullptr;
   };
-
-  int a = dihedral.atoms[1];
-  int b = dihedral.atoms[2];
-  return find(a, b) || find(b, a);
+  int b = central_bond.atoms[0];
+  int c = central_bond.atoms[1];
+  dihedral_type *found_dihedral = find(b, c);
+  if (!found_dihedral) found_dihedral = find(c, b);
+  // if (!found_dihedral) ERROR_ONE("Couldn't find dihedral");
+  return found_dihedral;
 }
 
 /* ---------------------------------------------------------------------- */
-
-void FixFluidizeMesh::remove_dihedral(dihedral_type dihedral) {
-  int datom = dihedral.atoms[1]; //owner atom of dihedral
+void FixFluidizeMesh::remove_dihedral(dihedral_type &dihedral) {
+  int owner_atom = dihedral.atoms[1];  // owner atom of dihedral
   int index = dihedral.index;
-  
-  //aliases
-  int &num_dihedral = atom->num_dihedral[datom];
-  int *dtype = atom->dihedral_type[datom];
-  tagint *atom1 = atom->dihedral_atom1[datom];
-  tagint *atom2 = atom->dihedral_atom2[datom];
-  tagint *atom3 = atom->dihedral_atom3[datom];
-  tagint *atom4 = atom->dihedral_atom4[datom];
-  
+
+  // aliases
+  int &num_dihedral = atom->num_dihedral[owner_atom];
+  int *dtype = atom->dihedral_type[owner_atom];
+  tagint *atom1 = atom->dihedral_atom1[owner_atom];
+  tagint *atom2 = atom->dihedral_atom2[owner_atom];
+  tagint *atom3 = atom->dihedral_atom3[owner_atom];
+  tagint *atom4 = atom->dihedral_atom4[owner_atom];
+
   if (index < 0 || num_dihedral == 0 || index >= num_dihedral) {
     ERROR_ONE("attempted to remove dihedral that does not exist");
   }
+  int erased = _atomToDihedral[owner_atom].erase(&dihedral);
+  if (!erased) ERROR_ONE("Didn't find the dihedral to erase");
 
   num_dihedral--;
+
+  int atoms_to_check[4] = {atom->map(atom1[index]), atom->map(atom2[index]),
+                           atom->map(atom3[index]), atom->map(atom4[index])};
+  bool we_good = true;
+  for (int i = 0; i < 4; i++) {
+    if (atoms_to_check[i] != dihedral.atoms[i]) we_good = false;
+  }
+  if (!we_good) {
+    std::cout << "Trying to remove {" << dihedral.atoms[0] << ", "
+              << dihedral.atoms[1] << ", " << dihedral.atoms[2] << ", "
+              << dihedral.atoms[3] << "}"
+              << " which should match (but doesn't) {"
+              << atom->map(atom1[index]) << ", " << atom->map(atom2[index])
+              << ", " << atom->map(atom3[index]) << ", "
+              << atom->map(atom4[index]) << "}" << std::endl;
+  }
+
   if (index != num_dihedral) {
+    // if the dihedral we want to remove isn't the last one we
+    // swap the last dihedral into this slot, this means we need to
+    // update its index as well.
+    dihedral_type *swappedDihedral = find_dihedral(
+        {atom->map(atom2[num_dihedral]), atom->map(atom3[num_dihedral])});
+    if (swappedDihedral) {
+      swappedDihedral->index = index;
+      swappedDihedral->type = dtype[index];
+    } else {
+      ERROR_ONE("Couldn't find dihedral to swap while removing one");
+    }
+
     dtype[index] = dtype[num_dihedral];
     atom1[index] = atom1[num_dihedral];
     atom2[index] = atom2[num_dihedral];
     atom3[index] = atom3[num_dihedral];
     atom4[index] = atom4[num_dihedral];
+    // find this swapped dihedral
   }
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixFluidizeMesh::insert_dihedral(dihedral_type dihedral) {
+void FixFluidizeMesh::insert_dihedral(dihedral_type &dihedral) {
   int a = dihedral.atoms[0];
   int b = dihedral.atoms[1];
   int c = dihedral.atoms[2];
@@ -660,61 +741,65 @@ void FixFluidizeMesh::insert_dihedral(dihedral_type dihedral) {
 
   int &num_dihedral = atom->num_dihedral[b];
   if (num_dihedral < atom->dihedral_per_atom) {
+    // dihedrals_type stores golbal id's while dihedral_atomN works with local
+    // ids (tag)
     atom->dihedral_atom1[b][num_dihedral] = atom->tag[a];
     atom->dihedral_atom2[b][num_dihedral] = atom->tag[b];
     atom->dihedral_atom3[b][num_dihedral] = atom->tag[c];
     atom->dihedral_atom4[b][num_dihedral] = atom->tag[d];
     atom->dihedral_type[b][num_dihedral] = dihedral.type;
+    dihedral.index = num_dihedral;
     num_dihedral++;
+    _atomToDihedral[b].insert(&dihedral);
   } else {
-    ERROR_ONE("No space for addition dihedrals - consider increasing extra/dihedral/per/atom");
+    ERROR_ONE(
+        "No space for addition dihedrals - consider increasing "
+        "extra/dihedral/per/atom");
   }
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixFluidizeMesh::swap_dihedrals(dihedral_type old_dihedral, dihedral_type new_dihedral) {
-  if (old_dihedral.atoms[1] != new_dihedral.atoms[1]) {
-
-    //std::cout<<"6. 1 != 1"<<std::endl;
-    remove_dihedral(old_dihedral);
-    insert_dihedral(new_dihedral);
-    return;
-  }
-
-  // if the new dihedral is owned by the same atom as the old one, we can
-  // optimize the removal/insertion
-  int type = old_dihedral.type;
-  int index = old_dihedral.index;
-  int a = new_dihedral.atoms[0];
-  int b = new_dihedral.atoms[1];
-  int c = new_dihedral.atoms[2];
-  int d = new_dihedral.atoms[3];
-
-  atom->dihedral_atom1[b][index] = atom->tag[a];
-  atom->dihedral_atom2[b][index] = atom->tag[b];
-  atom->dihedral_atom3[b][index] = atom->tag[c];
-  atom->dihedral_atom4[b][index] = atom->tag[d];
-  atom->dihedral_type[b][index] = type;
-}
-
-/* ---------------------------------------------------------------------- */
-
-// this effectively does a set difference between the atoms in 'a' and those
-// in 'b'. Assumes that 3 of the 4 atoms in 'a' are in 'b'.
-int FixFluidizeMesh::find_exterior_atom(dihedral_type a, dihedral_type b) {
-  for (int i : a.atoms) {
-    bool found = false;
-    for (int j : b.atoms) {
-      if (i == j) {
-        found = true;
-        break;
-      }
+void FixFluidizeMesh::swap_atoms_in_dihedral(dihedral_type &dihedral,
+                                             tagint oldAtom, tagint newAtom) {
+  // find which atom we are replacing
+  int atom_index = -1;
+  for (int i = 0; i < 4; i++) {
+    if (oldAtom == dihedral.atoms[i]) {
+      atom_index = i;
+      break;
     }
-
-    if (!found) return i;
+  }
+  if (atom_index == -1) {
+    ERROR_ONE("Couldn't find atom in dihedral durring substitution");
   }
 
-  ERROR_ONE("unable to find exterior atom");
-  return -1;
+  switch (atom_index) {
+    case 1:
+      // if its the 1st atom then we have to full remove and reinsert it
+      // because that atom owns this dihedral
+      remove_dihedral(dihedral);
+      dihedral.atoms[1] = newAtom;
+      insert_dihedral(dihedral);
+      break;
+
+    // if we're changing a different one than we have to do less
+    case 0:
+      dihedral.atoms[0] = newAtom;
+      atom->dihedral_atom1[dihedral.atoms[1]][dihedral.index] =
+          atom->tag[newAtom];
+      break;
+
+    case 2:
+      dihedral.atoms[2] = newAtom;
+      atom->dihedral_atom3[dihedral.atoms[1]][dihedral.index] =
+          atom->tag[newAtom];
+      break;
+
+    case 3:
+      dihedral.atoms[3] = newAtom;
+      atom->dihedral_atom4[dihedral.atoms[1]][dihedral.index] =
+          atom->tag[newAtom];
+      break;
+  }
 }

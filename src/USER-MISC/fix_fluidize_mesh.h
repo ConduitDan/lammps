@@ -13,22 +13,24 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(fluidize/mesh, FixFluidizeMesh)
+FixStyle(fluidize / mesh, FixFluidizeMesh)
 
 #else
 
 #ifndef LMP_FIX_FLUIDIZE_MESH_H
 #define LMP_FIX_FLUIDIZE_MESH_H
 
-#include "fix.h"
+#include <unordered_set>
+#include <vector>
 
+#include "fix.h"
 namespace LAMMPS_NS {
 
 class FixFluidizeMesh : public Fix {
   struct bond_type;
   struct dihedral_type;
 
-public:
+ public:
   FixFluidizeMesh(class LAMMPS *, int, char **);
   virtual ~FixFluidizeMesh();
 
@@ -36,7 +38,7 @@ public:
   void init() override;
   void post_integrate() override;
 
-private:
+ private:
   class RanMars *random;
   class Compute *temperature;
   double swap_probability;
@@ -44,28 +46,40 @@ private:
   double rmin2;
   double kbt;
 
-  int n_accept=0;
-  int n_reject=0;
+  std::vector<std::unordered_set<dihedral_type *> > _atomToDihedral;
+  std::vector<dihedral_type> _dihedralList;
+
+  int n_accept = 0;
+  int n_reject = 0;
 
   double compute_bending_energy(dihedral_type);
-  
-  bool accept_change(bond_type, bond_type, dihedral_type, dihedral_type, dihedral_type (&old_nbs)[4], dihedral_type (&new_nbs)[4]);
-  void try_swap(int, int, int, int);
+
+  bool accept_change(double);
+
+  void try_swap(dihedral_type &);
+  void flip_central_dihedral(dihedral_type &dihderal);
+  void flip_central_bond(dihedral_type dihedral);
+  void swap_dihedral(dihedral_type &dihderal);
+  double swap_dihedral_calc_E(dihedral_type &dihderal);
+
   void print_p_acc();
 
   bool find_bond(bond_type &);
   void remove_bond(bond_type);
   void insert_bond(bond_type);
+  void check_bond_length(bond_type);
+  double compute_bond_energy(bond_type bond);
 
-  bool find_dihedral(dihedral_type &);
-  void remove_dihedral(dihedral_type);
-  void insert_dihedral(dihedral_type);
-  void swap_dihedrals(dihedral_type, dihedral_type);
+  dihedral_type *find_dihedral(bond_type centralBond);
+  void remove_dihedral(dihedral_type &);
+  void insert_dihedral(dihedral_type &);
+  void swap_atoms_in_dihedral(dihedral_type &dihedral, tagint oldAtom,
+                              tagint newAtom);
 
   int find_exterior_atom(dihedral_type a, dihedral_type b);
 };
 
-} // namespace LAMMPS_NS
+}  // namespace LAMMPS_NS
 
 #endif
 #endif
