@@ -199,7 +199,7 @@ void FixFluidizeMesh::post_integrate() {
 
   bool skip;
   int a, b, c, d;
-
+  int n_accept_old = n_accept;
   // construct a list of dihedrals and a corrsponding map from atom to all the
   // dihedrals it owns. this allows us random access into the full list of
   // dihedrals.
@@ -235,7 +235,10 @@ void FixFluidizeMesh::post_integrate() {
       dihedral_cnt++;
     }
   }
-
+  // consistency check
+  // for (auto &dihedral : _dihedralList) {
+  //   check_central_bond(dihedral);
+  // }
   // one sweep = ndihedrals attempts to flip bonds
   for (int count = 0; count < atom->ndihedrals; count++) {
     // Choose a dihedral at random; i = [0, ndihedral - 1]
@@ -263,9 +266,13 @@ void FixFluidizeMesh::post_integrate() {
     }
     // Make an attempt to flip the bond
     if (!skip) {
-      try_swap(_dihedralList[index]);
+      if (check_candidacy(_dihedralList[index])) {
+        try_swap(_dihedralList[index]);
+      }
     }
   }
+  // std::cout << "Fluidization made " << n_accept - n_accept_old << " flips"
+  //           << std::endl;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -405,6 +412,7 @@ void FixFluidizeMesh::flip_central_dihedral(dihedral_type &dihedral) {
   d = dihedral.atoms[3];
 
   // flip the bond
+  // check_central_bond(dihedral);
   flip_central_bond(dihedral);
   // remove the dihedral;
   remove_dihedral(dihedral);
@@ -419,7 +427,53 @@ void FixFluidizeMesh::flip_central_dihedral(dihedral_type &dihedral) {
 }
 
 /* ---------------------------------------------------------------------- */
+void FixFluidizeMesh::check_central_bond(dihedral_type dihedral) {
+  // flips the bond of a dihedral
+  tagint a, b, c, d;
+  a = dihedral.atoms[0];
+  b = dihedral.atoms[1];
+  c = dihedral.atoms[2];
+  d = dihedral.atoms[3];
+  bond_type old_bond = {b, c};
+  bond_type new_bond = {a, d};
+  if (!find_bond(old_bond)) {
+    std::cout << "Candidate Bonds for <" << atom->tag[b] << ", " << atom->tag[c]
+              << ">:" << std::endl;
+    for (int i = 0; i < atom->num_bond[b]; i++) {
+      std::cout << "<" << atom->tag[b] << ", " << atom->bond_atom[b][i] << ">"
+                << std::endl;
+    }
+    for (int i = 0; i < atom->num_bond[c]; i++) {
+      std::cout << "<" << atom->tag[c] << ", " << atom->bond_atom[c][i] << ">"
+                << std::endl;
+    }
+    std::cout << find_bond(old_bond) << " with index " << old_bond.index
+              << std::endl;
 
+    ERROR_ONE("Error: could not find bonds to swap! (in try_swap)");
+  }
+  if (find_bond(new_bond)) {
+    std::cout << "Dihedral is {"<<a<<", "<<b<<", "<<c<<", "<<d<<"}"<<std::endl;
+    std::cout << "Candidate Bonds for <" << atom->tag[a] << ", " << atom->tag[d]
+              << "> ("
+              << "<" << a << ", " << d << ">):" << std::endl;
+    for (int i = 0; i < atom->num_bond[a]; i++) {
+      std::cout << "<" << atom->tag[a] << ", " << atom->bond_atom[a][i] << "> "
+                << "(<" << a << ", " << atom->map(atom->bond_atom[a][i]) << ">)"
+                << std::endl;
+    }
+    for (int i = 0; i < atom->num_bond[d]; i++) {
+      std::cout << "<" << atom->tag[d] << ", " << atom->bond_atom[d][i] << "> "
+                << "(<" << d << ", " << atom->map(atom->bond_atom[d][i]) << ">)"
+                << std::endl;
+    }
+    std::cout << find_bond(new_bond) << " with index " << new_bond.index
+              << std::endl;
+
+    ERROR_ONE("Error: found new bond before creation! (in try_swap)");
+  }
+  new_bond.type = old_bond.type;
+}
 void FixFluidizeMesh::flip_central_bond(dihedral_type dihedral) {
   // flips the bond of a dihedral
   tagint a, b, c, d;
@@ -429,10 +483,11 @@ void FixFluidizeMesh::flip_central_bond(dihedral_type dihedral) {
   d = dihedral.atoms[3];
   bond_type old_bond = {b, c};
   bond_type new_bond = {a, d};
-  if (!find_bond(old_bond) || find_bond(new_bond)) {
-    std::cout << "Error: could not find bonds to swap! (in try_swap)"
-              << std::endl;
-    return;
+  if (!find_bond(old_bond)) {
+    ERROR_ONE("Error: could not find bonds to swap! (in try_swap)");
+  }
+  if (find_bond(new_bond)) {
+    ERROR_ONE("Error: found new bond before creation! (in try_swap)");
   }
   new_bond.type = old_bond.type;
   remove_bond(old_bond);
@@ -472,6 +527,12 @@ void FixFluidizeMesh::try_swap(dihedral_type &dihedral) {
   }
   n_accept++;
   next_reneighbor = update->ntimestep;
+  // report_swap(dihedral);
+  // consistency check
+  // for (auto &dihedral : _dihedralList) {
+    // check_central_bond(dihedral);
+  // }
+
 }
 /* ---------------------------------------------------------------------- */
 // print acceptance probability
@@ -591,7 +652,7 @@ bool FixFluidizeMesh::find_bond(bond_type &bond) {
     bond.atoms[1] = b;
     tagint target = atom->tag[b];
     for (int i = 0; i < atom->num_bond[a]; ++i) {
-      if (atom->bond_atom[a][i] == target) {
+      if (atom->map(atom->bond_atom[a][i]) == b) {
         bond.type = atom->bond_type[a][i];
         bond.index = i;
         return true;
@@ -802,4 +863,42 @@ void FixFluidizeMesh::swap_atoms_in_dihedral(dihedral_type &dihedral,
           atom->tag[newAtom];
       break;
   }
+}
+void FixFluidizeMesh::report_swap(dihedral_type dihedral){
+  tagint a, b, c, d;
+  tagint *atoms = dihedral.atoms;
+  a = atoms[0];
+  b = atoms[1];
+  c = atoms[2];
+  d = atoms[3];
+
+  // find the exterior dihedrals by their center bonds
+  dihedral_type *exteriorDihedral1 = find_dihedral({b, a});
+  dihedral_type *exteriorDihedral2 = find_dihedral({a, c});
+  dihedral_type *exteriorDihedral3 = find_dihedral({c, d});
+  dihedral_type *exteriorDihedral4 = find_dihedral({d, b});
+
+  std::cout<<"Swapped dihedral {"<<a<<", "<<b<<", "<<c<<", "<<d<<"} <- {"<<b<<", "<<a<<", "<<d<<", "<<c<<"}"<<std::endl;
+  std::cout<<"Also Substituted:"<<std::endl;
+  std::cout<<"{"<<exteriorDihedral1->atoms[0]<<", "<<exteriorDihedral1->atoms[1]<<", "<<exteriorDihedral1->atoms[2]<<", "<<exteriorDihedral1->atoms[3]<<"} with "<<d<<"->"<<c<<std::endl;
+  std::cout<<"{"<<exteriorDihedral2->atoms[0]<<", "<<exteriorDihedral2->atoms[1]<<", "<<exteriorDihedral2->atoms[2]<<", "<<exteriorDihedral2->atoms[3]<<"} with "<<a<<"->"<<c<<std::endl;
+  std::cout<<"{"<<exteriorDihedral3->atoms[0]<<", "<<exteriorDihedral3->atoms[1]<<", "<<exteriorDihedral3->atoms[2]<<", "<<exteriorDihedral3->atoms[3]<<"} with "<<a<<"->"<<b<<std::endl;
+  std::cout<<"{"<<exteriorDihedral4->atoms[0]<<", "<<exteriorDihedral4->atoms[1]<<", "<<exteriorDihedral4->atoms[2]<<", "<<exteriorDihedral4->atoms[3]<<"} with "<<d<<"->"<<b<<std::endl;
+}
+
+bool FixFluidizeMesh::check_candidacy(dihedral_type dihedral){
+  tagint a, b, c, d;
+  tagint *atoms = dihedral.atoms;
+  a = atoms[0];
+  b = atoms[1];
+  c = atoms[2];
+  d = atoms[3];
+  // check the connectivity on b and c, we want to avoid them becoming degenerate. It should not get less than 3, (this can cause degenercy of bonds)
+
+  // if the new bond already exisits than this flip would make us degenerate. Skip
+  bond_type new_bond = {a, d};
+  if (find_bond(new_bond)) return false;
+
+  return true;
+
 }

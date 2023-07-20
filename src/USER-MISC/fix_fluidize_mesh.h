@@ -13,7 +13,7 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(fluidize / mesh, FixFluidizeMesh)
+FixStyle(fluidize/mesh, FixFluidizeMesh)
 
 #else
 
@@ -77,6 +77,10 @@ class FixFluidizeMesh : public Fix {
                               tagint newAtom);
 
   int find_exterior_atom(dihedral_type a, dihedral_type b);
+
+  void check_central_bond(dihedral_type dihedral);
+  void report_swap(dihedral_type);
+  bool check_candidacy(dihedral_type);
 };
 
 }  // namespace LAMMPS_NS
