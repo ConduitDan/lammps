@@ -55,6 +55,7 @@ class BondStillingerWeberHarmonic : public Bond {
   double *k_harmonic;
   double *lmin;
   double *lmax;
+  double *leq;
   double *delta;
   double *sigma;
 

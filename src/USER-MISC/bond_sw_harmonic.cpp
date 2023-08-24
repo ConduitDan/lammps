@@ -43,6 +43,7 @@ BondStillingerWeberHarmonic::BondStillingerWeberHarmonic(LAMMPS *lmp)
   k_harmonic{nullptr},
   lmin{nullptr},
   lmax{nullptr},
+  leq{nullptr},
   delta{nullptr},
   sigma{nullptr}
 {}
@@ -140,7 +141,7 @@ void BondStillingerWeberHarmonic::compute(int eflag, int vflag)
         ebond += u;
       }
     }
-    fbond -= k_harmonic[type] * (r-eq_length);
+    fbond -= k_harmonic[type] * (r-eq_length)/r;
     ebond += 0.5* k_harmonic[type] * (r-eq_length)*(r-eq_length);
 
     // apply force to each of 2 atoms
@@ -171,6 +172,7 @@ void BondStillingerWeberHarmonic::allocate()
   memory->create(k_harmonic,n+1,"bond:k_harmonic");
   memory->create(lmin,n+1,"bond:lmin");
   memory->create(lmax,n+1,"bond:lmax");
+  memory->create(leq,n+1,"bond:leq");
   memory->create(delta,n+1,"bond:delta");
   memory->create(sigma,n+1,"bond:sigma");
   memory->create(setflag,n+1,"bond:setflag");
@@ -183,7 +185,7 @@ void BondStillingerWeberHarmonic::allocate()
 
 void BondStillingerWeberHarmonic::coeff(int narg, char **arg)
 {
-  if (narg != 5 && narg != 6) error->all(FLERR,"Incorrect args for bond coefficients");
+  if (narg != 7 && narg != 8) error->all(FLERR,"Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo,ihi;
@@ -193,9 +195,10 @@ void BondStillingerWeberHarmonic::coeff(int narg, char **arg)
   double k_harmonic_one = utils::numeric(FLERR,arg[2],false,lmp);
   double lmin_one = utils::numeric(FLERR,arg[3],false,lmp);
   double lmax_one = utils::numeric(FLERR,arg[4],false,lmp);
-  double delta_one = utils::numeric(FLERR,arg[5],false,lmp);
+  double leq_one = utils::numeric(FLERR,arg[5],false,lmp);
+  double delta_one = utils::numeric(FLERR,arg[6],false,lmp);
   double sigma_one = 1.0;
-  if (narg == 7) sigma_one = utils::numeric(FLERR,arg[6],false,lmp);
+  if (narg == 8) sigma_one = utils::numeric(FLERR,arg[7],false,lmp);
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
@@ -203,6 +206,7 @@ void BondStillingerWeberHarmonic::coeff(int narg, char **arg)
     k_harmonic[i] = k_harmonic_one;
     lmin[i] = lmin_one;
     lmax[i] = lmax_one;
+    leq[i] = leq_one;
     delta[i] = delta_one;
     sigma[i] = sigma_one;
     setflag[i] = 1;
@@ -233,7 +237,7 @@ void BondStillingerWeberHarmonic::init_style()
 
 double BondStillingerWeberHarmonic::equilibrium_distance(int i)
 {
-  return 0.5 * (lmin[i] + lmax[i]);
+  return leq[i];
 }
 
 /* ----------------------------------------------------------------------
@@ -245,6 +249,7 @@ void BondStillingerWeberHarmonic::write_restart(FILE *fp)
   fwrite(&k[1],sizeof(double),atom->nbondtypes,fp);
   fwrite(&lmin[1],sizeof(double),atom->nbondtypes,fp);
   fwrite(&lmax[1],sizeof(double),atom->nbondtypes,fp);
+  fwrite(&leq[1],sizeof(double),atom->nbondtypes,fp);
   fwrite(&delta[1],sizeof(double),atom->nbondtypes,fp);
   fwrite(&sigma[1],sizeof(double),atom->nbondtypes,fp);
 }
@@ -262,6 +267,7 @@ void BondStillingerWeberHarmonic::read_restart(FILE *fp)
     utils::sfread(FLERR,&k_harmonic[1],sizeof(double),atom->nbondtypes,fp,nullptr,error);
     utils::sfread(FLERR,&lmin[1],sizeof(double),atom->nbondtypes,fp,nullptr,error);
     utils::sfread(FLERR,&lmax[1],sizeof(double),atom->nbondtypes,fp,nullptr,error);
+    utils::sfread(FLERR,&leq[1],sizeof(double),atom->nbondtypes,fp,nullptr,error);
     utils::sfread(FLERR,&delta[1],sizeof(double),atom->nbondtypes,fp,nullptr,error);
     utils::sfread(FLERR,&sigma[1],sizeof(double),atom->nbondtypes,fp,nullptr,error);
   }
@@ -269,6 +275,7 @@ void BondStillingerWeberHarmonic::read_restart(FILE *fp)
   MPI_Bcast(&k_harmonic[1],atom->nbondtypes,MPI_DOUBLE,0,world);
   MPI_Bcast(&lmin[1],atom->nbondtypes,MPI_DOUBLE,0,world);
   MPI_Bcast(&lmax[1],atom->nbondtypes,MPI_DOUBLE,0,world);
+  MPI_Bcast(&leq[1],atom->nbondtypes,MPI_DOUBLE,0,world);
   MPI_Bcast(&delta[1],atom->nbondtypes,MPI_DOUBLE,0,world);
   MPI_Bcast(&sigma[1],atom->nbondtypes,MPI_DOUBLE,0,world);
 
@@ -282,7 +289,7 @@ void BondStillingerWeberHarmonic::read_restart(FILE *fp)
 void BondStillingerWeberHarmonic::write_data(FILE *fp)
 {
   for (int i = 1; i <= atom->nbondtypes; i++)
-    fprintf(fp,"%d %g %g %g %g %g %g\n", i, k[i], k_harmonic[i], lmin[i], lmax[i], delta[i], sigma[i]);
+    fprintf(fp,"%d %g %g %g %g %g %g %g\n", i, k[i], k_harmonic[i], lmin[i], lmax[i], leq[i], delta[i], sigma[i]);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -347,6 +354,7 @@ void *BondStillingerWeberHarmonic::extract(const char *str, int &dim)
   if (strcmp(str,"k_harmonic")==0) return (void*) k_harmonic;
   if (strcmp(str,"lmin")==0) return (void*) lmin;
   if (strcmp(str,"lmax")==0) return (void*) lmax;
+  if (strcmp(str,"leq")==0) return (void*) leq;
   if (strcmp(str,"delta")==0) return (void*) delta;
   if (strcmp(str,"sigma")==0) return (void*) sigma;
   return nullptr;

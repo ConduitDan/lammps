@@ -894,10 +894,15 @@ bool FixFluidizeMesh::check_candidacy(dihedral_type dihedral){
   c = atoms[2];
   d = atoms[3];
   // check the connectivity on b and c, we want to avoid them becoming degenerate. It should not get less than 3, (this can cause degenercy of bonds)
-
   // if the new bond already exisits than this flip would make us degenerate. Skip
+
+  
   bond_type new_bond = {a, d};
   if (find_bond(new_bond)) return false;
+
+  // also keep anything from getting above 10 bonds.. thats absurd
+  if (atom->num_bond[a]>9 || atom->num_bond[d]>9) return false;
+
 
   return true;
 
