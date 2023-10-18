@@ -58,6 +58,7 @@ BondStillingerWeberHarmonic::~BondStillingerWeberHarmonic()
     memory->destroy(k_harmonic);
     memory->destroy(lmin);
     memory->destroy(lmax);
+    memory->destroy(leq);
     memory->destroy(delta);
     memory->destroy(sigma);
   }
