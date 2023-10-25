@@ -208,7 +208,11 @@ void FixFluidizeMesh::post_integrate() {
   int dihedral_cnt = 0;
   _atomToDihedral.resize(atom->natoms);
   for (auto &atom_it : _atomToDihedral) atom_it.clear();
+  _connectivity.resize(atom->natoms);
+  std::fill(_connectivity.begin(), _connectivity.end(), 0);
   _dihedralList.resize(atom->ndihedrals);
+
+
   for (int i_det = 0; i_det < atom->nlocal; ++i_det) {  // for each atom
     if (!(atom->mask[i_det] & groupbit))
       continue;  // if this fix doesn't apply to this type of atom
@@ -216,8 +220,7 @@ void FixFluidizeMesh::post_integrate() {
     if (atom->num_dihedral[i_det] == 0)
       continue;  // if this atom doesn't have dihedrals continue
 
-    for (int j_det = 0; j_det < atom->num_dihedral[i_det];
-         ++j_det) {  // for each dihedral on atom i_det
+    for (int j_det = 0; j_det < atom->num_dihedral[i_det]; ++j_det) {  // for each dihedral on atom i_det
       if (atom->dihedral_atom2[i_det][j_det] != atom->tag[i_det])
         continue;  // I guess check if this diheardal exists?
       if (dihedral_cnt >= atom->ndihedrals)
@@ -234,7 +237,15 @@ void FixFluidizeMesh::post_integrate() {
 
       dihedral_cnt++;
     }
+    // also update the connectivity for the bonds
+    _connectivity[i_det] += atom->num_bond[i_det];
+    for (int bond_num = 0; bond_num < atom->num_bond[i_det]; bond_num++){
+      _connectivity[atom->map(atom->bond_atom[i_det][bond_num])]++; 
+    }
+    
   }
+
+
   // consistency check
   // for (auto &dihedral : _dihedralList) {
   //   check_central_bond(dihedral);
@@ -412,7 +423,7 @@ void FixFluidizeMesh::flip_central_dihedral(dihedral_type &dihedral) {
   d = dihedral.atoms[3];
 
   // flip the bond
-  // check_central_bond(dihedral);
+  check_central_bond(dihedral);
   flip_central_bond(dihedral);
   // remove the dihedral;
   remove_dihedral(dihedral);
@@ -672,6 +683,7 @@ bool FixFluidizeMesh::find_bond(bond_type &bond) {
 
 void FixFluidizeMesh::remove_bond(bond_type bond) {
   int a = bond.atoms[0];
+  int b = bond.atoms[1];
   int index = bond.index;
   int &num_bonds = atom->num_bond[a];
   int *bond_type = atom->bond_type[a];
@@ -680,7 +692,8 @@ void FixFluidizeMesh::remove_bond(bond_type bond) {
   if (index < 0 || num_bonds == 0) {
     ERROR_ONE("attempted to remove bond that does not exist");
   }
-
+  _connectivity[a]--;
+  _connectivity[b]--;
   num_bonds--;
   if (index != num_bonds) {
     bond_atom[index] = bond_atom[num_bonds];
@@ -700,6 +713,8 @@ void FixFluidizeMesh::insert_bond(bond_type bond) {
     atom->bond_atom[a][num_bonds] = atom->tag[b];
     atom->bond_type[a][num_bonds] = bond.type;
     num_bonds++;
+    _connectivity[a]++;
+    _connectivity[b]++;
   } else {
     ERROR_ONE(
         "No space for addition bonds - consider increasing "
@@ -897,12 +912,25 @@ bool FixFluidizeMesh::check_candidacy(dihedral_type dihedral){
   // if the new bond already exisits than this flip would make us degenerate. Skip
 
   
-  bond_type new_bond = {a, d};
-  if (find_bond(new_bond)) return false;
-  if (atom->num_bond[b]<4,atom->num_bond[c]<4) return false;
+  bond_type new_bond = {a, d};\
+  if (_connectivity[b]<5||_connectivity[c]<5) return false;
+
+  if (find_bond(new_bond)) {
+    return false;
+    std::cout << "Trying to remove {" << b << ", "<< c << "}"
+              << "and add {"<< a << ","<<d<<"}"
+              << "however that already exists"<<std::endl
+              << "connectivity on " << b << " is "<< _connectivity[b] << " and "
+              << c << " is " << _connectivity[c]<<std::endl;
+   
+    
+    
+    
+    //  ERROR_ONE("Cannot Find Bond");
+  }
 
   // also keep anything from getting above 10 bonds.. thats absurd
-  if (atom->num_bond[a]>9 || atom->num_bond[d]>9) return false;
+  if (_connectivity[a]>9 || _connectivity[d]>9) return false;
 
 
   return true;

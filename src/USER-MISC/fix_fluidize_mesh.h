@@ -48,6 +48,7 @@ class FixFluidizeMesh : public Fix {
 
   std::vector<std::unordered_set<dihedral_type *> > _atomToDihedral;
   std::vector<dihedral_type> _dihedralList;
+  std::vector<int> _connectivity;
 
   int n_accept = 0;
   int n_reject = 0;
