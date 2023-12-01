@@ -70,21 +70,6 @@ time from N^2 -> N
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-/* ---------------------------------------------------------------------- */
-
-struct FixFluidizeMesh::bond_type {
-  tagint atoms[2];
-  int type;
-  int index;
-};
-
-/* ---------------------------------------------------------------------- */
-
-struct FixFluidizeMesh::dihedral_type {
-  tagint atoms[4];
-  int type;
-  int index;
-};
 
 /* ---------------------------------------------------------------------- */
 
@@ -96,7 +81,7 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg)
       rmax2{},
       rmin2{},
       kbt{} {
-  if (narg < 6 || narg > 10) {
+  if (narg < 6 || narg > 12) {
     ILLEGAL("incorrect number of arguments");
   }
   arg += 3;
@@ -137,9 +122,14 @@ FixFluidizeMesh::FixFluidizeMesh(LAMMPS *lmp, int narg, char **arg)
       }
       rmin2 = rmin * rmin;
       iarg += 2;
+    } else if (strcmp(arg[iarg], "debug") ==0) {
+      if (iarg +1 >= narg) ILLEGAL("no value given to keyword 'debug'");
+      debug = (bool) utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      iarg += 2;
     } else {
       ILLEGAL("unknown keyword '{}'", arg[3]);
     }
+
   }
 
   if ((rmin2 > 0 || rmax2 > 0) && (rmin2 >= rmax2)) {
@@ -216,7 +206,11 @@ void FixFluidizeMesh::post_integrate() {
   for (int i_det = 0; i_det < atom->nlocal; ++i_det) {  // for each atom
     if (!(atom->mask[i_det] & groupbit))
       continue;  // if this fix doesn't apply to this type of atom
-
+      // also update the connectivity for the bonds
+      _connectivity[i_det] += atom->num_bond[i_det];
+      for (int bond_num = 0; bond_num < atom->num_bond[i_det]; bond_num++){
+        _connectivity[atom->map(atom->bond_atom[i_det][bond_num])]++; 
+      }
     if (atom->num_dihedral[i_det] == 0)
       continue;  // if this atom doesn't have dihedrals continue
 
@@ -237,20 +231,25 @@ void FixFluidizeMesh::post_integrate() {
 
       dihedral_cnt++;
     }
-    // also update the connectivity for the bonds
-    _connectivity[i_det] += atom->num_bond[i_det];
-    for (int bond_num = 0; bond_num < atom->num_bond[i_det]; bond_num++){
-      _connectivity[atom->map(atom->bond_atom[i_det][bond_num])]++; 
-    }
-    
+
+
   }
 
 
-  // consistency check
-  // for (auto &dihedral : _dihedralList) {
-  //   check_central_bond(dihedral);
-  // }
-  // one sweep = ndihedrals attempts to flip bonds
+
+
+  if (debug) {
+    std::cout<<"Starting Connectivity Historgram:"<<std::endl;
+      for (auto hist : count_vec_ele(_connectivity)){
+        std::cout<<"{"<<hist.first<<", "<<hist.second<<"}"<<std::endl;
+      }
+    std::string name= "topology/flips_";
+    name +=std::to_string(update->ntimestep);
+    name +=".dump";
+    file.open(name,std::fstream::out);
+  }
+
+
   for (int count = 0; count < atom->ndihedrals; count++) {
     // Choose a dihedral at random; i = [0, ndihedral - 1]
     int index = random->integer(atom->ndihedrals);
@@ -282,6 +281,10 @@ void FixFluidizeMesh::post_integrate() {
       }
     }
   }
+  if (debug) {
+    file.close();
+  }
+
   // std::cout << "Fluidization made " << n_accept - n_accept_old << " flips"
   //           << std::endl;
 }
@@ -369,6 +372,11 @@ double FixFluidizeMesh::swap_dihedral_calc_E(dihedral_type &dihedral) {
         exteriorDihedral4))
     ERROR_ONE("couldn't find exterior dihedral");
 
+  old_n1 = *exteriorDihedral1;
+  old_n2 = *exteriorDihedral2;
+  old_n3 = *exteriorDihedral3;
+  old_n4 = *exteriorDihedral4;
+
   // flip the central dihedral
   // find the inital energy of the dihedral
   double deltaE = -compute_bending_energy(dihedral);
@@ -376,7 +384,7 @@ double FixFluidizeMesh::swap_dihedral_calc_E(dihedral_type &dihedral) {
   // find the inital energy of the bond
   bond_type centralBond = {b, c};
   find_bond(centralBond);
-  deltaE -= compute_bond_energy(centralBond);
+  if (!isinf(deltaE)) deltaE -= compute_bond_energy(centralBond);
 
   // flip the central bond update the bond and dihedral
   flip_central_dihedral(dihedral);
@@ -384,18 +392,18 @@ double FixFluidizeMesh::swap_dihedral_calc_E(dihedral_type &dihedral) {
   // find the new bond energy
   centralBond = {a, d};
   find_bond(centralBond);
-  deltaE += compute_bond_energy(centralBond);
+  if (!isinf(deltaE)) deltaE += compute_bond_energy(centralBond);
 
   // calculate the new dihedral energy
-  deltaE += compute_bending_energy(dihedral);
+  if (!isinf(deltaE)) deltaE += compute_bending_energy(dihedral);
 
   // swap the appropriate atoms in the exterior dihedrals
 
   // compute their inital bending energy
-  deltaE -= compute_bending_energy(*exteriorDihedral1);
-  deltaE -= compute_bending_energy(*exteriorDihedral2);
-  deltaE -= compute_bending_energy(*exteriorDihedral3);
-  deltaE -= compute_bending_energy(*exteriorDihedral4);
+  if (!isinf(deltaE)) deltaE -= compute_bending_energy(*exteriorDihedral1);
+  if (!isinf(deltaE)) deltaE -= compute_bending_energy(*exteriorDihedral2);
+  if (!isinf(deltaE)) deltaE -= compute_bending_energy(*exteriorDihedral3);
+  if (!isinf(deltaE)) deltaE -= compute_bending_energy(*exteriorDihedral4);
 
   // make the subsitutions marked in the comment block above
   swap_atoms_in_dihedral(*exteriorDihedral1, c, d);
@@ -404,10 +412,10 @@ double FixFluidizeMesh::swap_dihedral_calc_E(dihedral_type &dihedral) {
   swap_atoms_in_dihedral(*exteriorDihedral4, c, a);
 
   // compute the final energy
-  deltaE += compute_bending_energy(*exteriorDihedral1);
-  deltaE += compute_bending_energy(*exteriorDihedral2);
-  deltaE += compute_bending_energy(*exteriorDihedral3);
-  deltaE += compute_bending_energy(*exteriorDihedral4);
+  if (!isinf(deltaE)) deltaE += compute_bending_energy(*exteriorDihedral1);
+  if (!isinf(deltaE)) deltaE += compute_bending_energy(*exteriorDihedral2);
+  if (!isinf(deltaE)) deltaE += compute_bending_energy(*exteriorDihedral3);
+  if (!isinf(deltaE)) deltaE += compute_bending_energy(*exteriorDihedral4);
 
   return deltaE;
 }
@@ -507,7 +515,7 @@ void FixFluidizeMesh::flip_central_bond(dihedral_type dihedral) {
 
 /* ---------------------------------------------------------------------- */
 
-void FixFluidizeMesh::check_bond_length(bond_type bond) {
+bool FixFluidizeMesh::check_bond_length(bond_type bond) {
   // Check that new bond has acceptable length
   int a1 = bond.atoms[0];
   int b1 = bond.atoms[1];
@@ -516,12 +524,10 @@ void FixFluidizeMesh::check_bond_length(bond_type bond) {
   double dz = atom->x[b1][2] - atom->x[a1][2];
   domain->minimum_image(dx, dy, dz);
   double r2 = dx * dx + dy * dy + dz * dz;
-  if (r2 < rmin2) {
-    std::cout << "Error: accepted bond too short!" << std::endl;
+  if (r2 < rmin2 || r2 > rmax2) {
+    return false;
   }
-  if (r2 > rmax2) {
-    std::cout << "Error: accepted bond too long!" << std::endl;
-  }
+  return true;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -538,7 +544,7 @@ void FixFluidizeMesh::try_swap(dihedral_type &dihedral) {
   }
   n_accept++;
   next_reneighbor = update->ntimestep;
-  // report_swap(dihedral);
+  if (debug) report_swap(dihedral,deltaE);
   // consistency check
   // for (auto &dihedral : _dihedralList) {
     // check_central_bond(dihedral);
@@ -616,7 +622,23 @@ double FixFluidizeMesh::compute_bending_energy(dihedral_type dihedral) {
   double costheta = N1_x * N2_x + N1_y * N2_y + N1_z * N2_z;
 
   // Returns the energy associated with the dihedral
-  return force->dihedral->single(dihedral.type, acos(costheta));
+  // we use -costheta because lammps defines 180 as flat
+  double E = force->dihedral->single(dihedral.type, acos(-costheta));
+  if (debug) {
+    double stiffness = 500;
+    double diff = abs(E - stiffness*(1-costheta));
+    // if (diff/abs(E)<1){
+    //   std::cout<<"I got " <<stiffness*(1-costheta)<<" Lammps got "<<E<<std::endl;
+    //   double theta = acos(costheta);
+    //   double E2 = force->dihedral->single(dihedral.type, theta-180);
+    //   std::cout<<E2;
+    //   ERROR_ALL("Bad Dihedral Energy");
+    // }
+  }
+
+  return E;
+
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -639,6 +661,38 @@ double FixFluidizeMesh::compute_bond_energy(bond_type bond) {
       energy += std::numeric_limits<double>::infinity();
     } else {
       energy += force->bond->single(bond.type, r2, a, b, f);
+      
+      if (debug) {
+        // do my own energy calculation 
+        double r = sqrt(r2);
+        double rmin = sqrt(rmin2);
+        double rmax = sqrt(rmax2);
+        // hardcoded valuse for right now
+        double delta = 0.5;
+        double sigma = 10000;
+        double leq = 1;
+        double k = 100;
+        double E = 0;
+        double E_repulsive = 0;
+        double E_attractive = 0;
+        double E_spring = 0;
+        if (r<rmin+delta) E_repulsive= sigma*exp(1.0/(r-(rmin+delta)))/(r-rmin);
+        if (r>rmax-delta) E_attractive= sigma*exp(1.0/((rmax-delta)-r))/(rmax-r);
+        E_spring =(r-leq)*(r-leq)*0.5*k;
+        E = E_repulsive+E_attractive+E_spring;
+
+        if ((abs(energy-E)/std::max(abs(energy),abs(E)))>1e-4){
+          std::cout<<"I think it should be "<<E<<" Lammps says "<<energy<<std::endl;
+          std::cout<<"R = "<<r<<std::endl;
+          std::cout<<"E_repulsive = "<<E_repulsive<<std::endl;
+          std::cout<<"E_attractive = "<<E_attractive<<std::endl;
+          std::cout<<"E_spring = "<<E_spring<<std::endl;
+           
+          ERROR_ALL("Bad Energy Calculation");
+
+        }
+
+      }
     }
   }
 
@@ -648,11 +702,10 @@ double FixFluidizeMesh::compute_bond_energy(bond_type bond) {
 /* ---------------------------------------------------------------------- */
 
 bool FixFluidizeMesh::accept_change(double deltaE) {
-  if (random->uniform() < std::exp(-deltaE / kbt)) {
-    return true;
-  } else {
-    return false;
-  }
+  // delta = new energy - old energy
+
+  return (deltaE<0 || random->uniform() < std::exp(-deltaE / kbt));
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -879,26 +932,64 @@ void FixFluidizeMesh::swap_atoms_in_dihedral(dihedral_type &dihedral,
       break;
   }
 }
-void FixFluidizeMesh::report_swap(dihedral_type dihedral){
+void FixFluidizeMesh::report_swap(dihedral_type dihedral,double E){
+  auto tag_convert = [&](dihedral_type di){
+    dihedral_type tag_di = {atom->tag[di.atoms[0]],atom->tag[di.atoms[1]],atom->tag[di.atoms[2]],atom->tag[di.atoms[3]]};
+    return tag_di;
+  };
+
+
   tagint a, b, c, d;
   tagint *atoms = dihedral.atoms;
   a = atoms[0];
   b = atoms[1];
   c = atoms[2];
   d = atoms[3];
+  // output positions as well i guess?
+  double xa = atom->x[a][0];
+  double ya = atom->x[a][1];
+  double za = atom->x[a][2];
 
-  // find the exterior dihedrals by their center bonds
-  dihedral_type *exteriorDihedral1 = find_dihedral({b, a});
-  dihedral_type *exteriorDihedral2 = find_dihedral({a, c});
-  dihedral_type *exteriorDihedral3 = find_dihedral({c, d});
-  dihedral_type *exteriorDihedral4 = find_dihedral({d, b});
+  double xb = atom->x[b][0];
+  double yb = atom->x[b][1];
+  double zb = atom->x[b][2];
 
-  std::cout<<"Swapped dihedral {"<<a<<", "<<b<<", "<<c<<", "<<d<<"} <- {"<<b<<", "<<a<<", "<<d<<", "<<c<<"}"<<std::endl;
-  std::cout<<"Also Substituted:"<<std::endl;
-  std::cout<<"{"<<exteriorDihedral1->atoms[0]<<", "<<exteriorDihedral1->atoms[1]<<", "<<exteriorDihedral1->atoms[2]<<", "<<exteriorDihedral1->atoms[3]<<"} with "<<d<<"->"<<c<<std::endl;
-  std::cout<<"{"<<exteriorDihedral2->atoms[0]<<", "<<exteriorDihedral2->atoms[1]<<", "<<exteriorDihedral2->atoms[2]<<", "<<exteriorDihedral2->atoms[3]<<"} with "<<a<<"->"<<c<<std::endl;
-  std::cout<<"{"<<exteriorDihedral3->atoms[0]<<", "<<exteriorDihedral3->atoms[1]<<", "<<exteriorDihedral3->atoms[2]<<", "<<exteriorDihedral3->atoms[3]<<"} with "<<a<<"->"<<b<<std::endl;
-  std::cout<<"{"<<exteriorDihedral4->atoms[0]<<", "<<exteriorDihedral4->atoms[1]<<", "<<exteriorDihedral4->atoms[2]<<", "<<exteriorDihedral4->atoms[3]<<"} with "<<d<<"->"<<b<<std::endl;
+  double xc = atom->x[c][0];
+  double yc = atom->x[c][1];
+  double zc = atom->x[c][2];
+
+  double xd = atom->x[d][0];
+  double yd = atom->x[d][1];
+  double zd = atom->x[d][2];
+
+  // find the exterior dihedrals by their center bonds // rember a<->b & c<->d for finding these
+  dihedral_type exteriorDihedral1 = tag_convert(*find_dihedral({a, b}));
+  dihedral_type exteriorDihedral2 = tag_convert(*find_dihedral({b, d}));
+  dihedral_type exteriorDihedral3 = tag_convert(*find_dihedral({d, c}));
+  dihedral_type exteriorDihedral4 = tag_convert(*find_dihedral({c, a}));
+  old_n1 = tag_convert(old_n1);
+  old_n2 = tag_convert(old_n2);
+  old_n3 = tag_convert(old_n3);
+  old_n4 = tag_convert(old_n4);
+  a = atom->tag[atoms[0]];
+  b = atom->tag[atoms[1]];
+  c = atom->tag[atoms[2]];
+  d = atom->tag[atoms[3]];
+
+  file<<"main: {"<<b<<", "<<a<<", "<<d<<", "<<c<<"} -> {"<<a<<", "<<b<<", "<<c<<", "<<d<<"};  Neighbors: "\
+      <<"{"<<old_n1.atoms[0]<<", "<<old_n1.atoms[1]<<", "<<old_n1.atoms[2]<<", "<<old_n1.atoms[3]<<"} -> "\
+      <<"{"<<exteriorDihedral1.atoms[0]<<", "<<exteriorDihedral1.atoms[1]<<", "<<exteriorDihedral1.atoms[2]<<", "<<exteriorDihedral1.atoms[3]<<"} "<<d<<"->"<<c<< ","\
+      <<"{"<<old_n2.atoms[0]<<", "<<old_n2.atoms[1]<<", "<<old_n2.atoms[2]<<", "<<old_n2.atoms[3]<<"} -> "\
+      <<"{"<<exteriorDihedral2.atoms[0]<<", "<<exteriorDihedral2.atoms[1]<<", "<<exteriorDihedral2.atoms[2]<<", "<<exteriorDihedral2.atoms[3]<<"} "<<a<<"->"<<c<< ","\
+      <<"{"<<old_n3.atoms[0]<<", "<<old_n3.atoms[1]<<", "<<old_n3.atoms[2]<<", "<<old_n3.atoms[3]<<"} -> "\
+      <<"{"<<exteriorDihedral3.atoms[0]<<", "<<exteriorDihedral3.atoms[1]<<", "<<exteriorDihedral3.atoms[2]<<", "<<exteriorDihedral3.atoms[3]<<"} "<<a<<"->"<<b<< ","\
+      <<"{"<<old_n4.atoms[0]<<", "<<old_n4.atoms[1]<<", "<<old_n4.atoms[2]<<", "<<old_n4.atoms[3]<<"} -> "\
+      <<"{"<<exteriorDihedral4.atoms[0]<<", "<<exteriorDihedral4.atoms[1]<<", "<<exteriorDihedral4.atoms[2]<<", "<<exteriorDihedral4.atoms[3]<<"} "<<d<<"->"<<b<<" Energy: "<<E<<std::endl;
+
+
+  file<<"{<"<<xb<<", "<<yb<<", "<<zb<<">, "<<"<"<<xa<<", "<<ya<<", "<<za<<">, "\
+      << "<"<<xd<<", "<<yd<<", "<<zd<<">, "<<"<"<<xc<<", "<<yc<<", "<<zc<<">}"<<std::endl;
+
 }
 
 bool FixFluidizeMesh::check_candidacy(dihedral_type dihedral){
@@ -930,9 +1021,44 @@ bool FixFluidizeMesh::check_candidacy(dihedral_type dihedral){
   }
 
   // also keep anything from getting above 10 bonds.. thats absurd
-  if (_connectivity[a]>9 || _connectivity[d]>9) return false;
+  if (_connectivity[a]>8 || _connectivity[d]>8) return false;
 
+  return check_bond_length({a,d});
+}
 
-  return true;
+std::vector<std::array<tagint,2>> FixFluidizeMesh::find_all_bonds_on_node(tagint node){
+  std::vector<std::array<tagint,2>> bond_list;
 
+  int map_int = atom->map(node);
+  // start with this atom
+  for (int bond_num = 0; bond_num<atom->num_bond[map_int]; bond_num++){
+    std::array<tagint,2> bond = {node,atom->bond_atom[map_int][bond_num]};
+    bond_list.push_back(bond);
+
+  }
+
+  for (int i_det = 0; i_det < atom->nlocal; ++i_det) {  // for each atom
+    for (int bond_num = 0; bond_num < atom->num_bond[i_det]; bond_num++){
+      if (atom->bond_atom[i_det][bond_num]==node){
+        std::array<tagint,2> bond = {atom->tag[i_det],node};
+
+        bond_list.push_back(bond);
+      }
+    }
+  }
+
+  return bond_list;
+}
+
+std::map<int,int> FixFluidizeMesh::count_vec_ele(std::vector<int> vec){
+  std::map<int,int> hist;
+  for (auto &ele:vec){
+    auto entry = hist.find(ele);
+    if (entry == hist.end()){
+      hist[ele] = 1;
+    } else {
+      entry->second++;
+    }
+  }
+  return hist;
 }

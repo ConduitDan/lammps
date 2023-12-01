@@ -315,7 +315,7 @@ double BondStillingerWeberHarmonic::single(int type, double rsq, int /*i*/, int 
         WARN("SW bond too short at step {}: {}", update->ntimestep, r);
         if (r <= 0.5 * l0) ERROR_ONE("Bad SW bond");
         else r = 0.95 * l0 + 0.05 * l1;
-      }
+    }
     
     a = sigma[type] / (r - l0);
     b = sigma[type] / (r - l1);

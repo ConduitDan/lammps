@@ -21,14 +21,27 @@ FixStyle(fluidize/mesh, FixFluidizeMesh)
 #define LMP_FIX_FLUIDIZE_MESH_H
 
 #include <unordered_set>
+#include <map>
 #include <vector>
+#include <fstream>
 
 #include "fix.h"
 namespace LAMMPS_NS {
 
 class FixFluidizeMesh : public Fix {
-  struct bond_type;
-  struct dihedral_type;
+struct bond_type {
+  tagint atoms[2];
+  int type;
+  int index;
+};
+
+/* ---------------------------------------------------------------------- */
+
+struct dihedral_type {
+  tagint atoms[4];
+  int type;
+  int index;
+};
 
  public:
   FixFluidizeMesh(class LAMMPS *, int, char **);
@@ -45,6 +58,17 @@ class FixFluidizeMesh : public Fix {
   double rmax2;
   double rmin2;
   double kbt;
+
+  dihedral_type old_dihedral;
+  dihedral_type old_n1;
+  dihedral_type old_n2;
+  dihedral_type old_n3;
+  dihedral_type old_n4;
+  
+
+  bool debug=false;
+  std::fstream file;
+
 
   std::vector<std::unordered_set<dihedral_type *> > _atomToDihedral;
   std::vector<dihedral_type> _dihedralList;
@@ -68,7 +92,7 @@ class FixFluidizeMesh : public Fix {
   bool find_bond(bond_type &);
   void remove_bond(bond_type);
   void insert_bond(bond_type);
-  void check_bond_length(bond_type);
+  bool check_bond_length(bond_type);
   double compute_bond_energy(bond_type bond);
 
   dihedral_type *find_dihedral(bond_type centralBond);
@@ -80,8 +104,12 @@ class FixFluidizeMesh : public Fix {
   int find_exterior_atom(dihedral_type a, dihedral_type b);
 
   void check_central_bond(dihedral_type dihedral);
-  void report_swap(dihedral_type);
+  void report_swap(dihedral_type,double);
   bool check_candidacy(dihedral_type);
+  void write_flip(dihedral_type dihedral);
+
+  std::vector<std::array<tagint,2>> find_all_bonds_on_node(tagint node);
+  std::map<int,int> count_vec_ele(std::vector<int> vec);
 };
 
 }  // namespace LAMMPS_NS
