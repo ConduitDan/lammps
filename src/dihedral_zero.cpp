@@ -119,3 +119,7 @@ void DihedralZero::write_data(FILE *fp) {
   for (int i = 1; i <= atom->ndihedraltypes; i++)
     fprintf(fp,"%d\n",i);
 }
+
+double DihedralZero::single(int, double){
+  return 0;
+}

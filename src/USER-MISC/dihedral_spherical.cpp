@@ -826,7 +826,9 @@ void DihedralSpherical::write_data(FILE *fp)
   }
 }
 
-
+double DihedralSpherical::single(int, double){
+  return 0;
+}
 
 
 

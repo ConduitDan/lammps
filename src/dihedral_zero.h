@@ -36,6 +36,8 @@ class DihedralZero : public Dihedral {
   virtual void coeff(int, char **);
   virtual void settings(int, char **);
 
+  virtual double single(int, double);
+
   void write_restart(FILE *);
   void read_restart(FILE *);
   void write_data(FILE *);

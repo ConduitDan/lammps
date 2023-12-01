@@ -1,0 +1,46 @@
+units lj
+dimension 3
+boundary p p p
+atom_style bond
+newton off
+
+comm_modify cutoff 1.8
+
+neighbor 1.0 bin
+neigh_modify every 1 delay 0 check yes
+
+variable seed equal 31415
+variable cutoff equal "2^(1.0/6.0)"
+
+region domain block -10 10 -10 10 -10 10
+create_box 1 domain &
+    bond/types 1 &
+    extra/bond/per/atom 1
+
+molecule dumbbell dumbbell.mol
+create_atoms 0 random 400 ${seed} domain mol dumbbell ${seed}
+
+mass * 1.0
+
+pair_style soft ${cutoff}
+pair_coeff * * 500
+
+bond_style harmonic
+bond_coeff * 1000 1.0
+special_bonds fene
+
+minimize 1e-6 1e-6 1000 1000
+reset_timestep 0
+
+pair_style lj/cut ${cutoff}
+pair_coeff * * 1.0 1.0
+pair_modify shift yes
+
+fix integrator  all nve
+fix temperature all langevin 1.0 1.0 1.0 ${seed}
+fix propulsion  all propel/bond 5.0
+
+dump 1 all atom 100 trajectory.dump
+
+timestep 1e-3
+run 10000

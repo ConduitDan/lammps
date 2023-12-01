@@ -249,6 +249,13 @@ void DihedralHarmonic::compute(int eflag, int vflag)
 
 /* ---------------------------------------------------------------------- */
 
+double DihedralHarmonic::single(int type, double phi)
+{
+  return k[type]*(1 + sign[type]*cos(multiplicity[type]*phi));
+}
+
+/* ---------------------------------------------------------------------- */
+
 void DihedralHarmonic::allocate()
 {
   allocated = 1;

@@ -354,3 +354,6 @@ void DihedralOPLS::write_data(FILE *fp)
     fprintf(fp,"%d %g %g %g %g\n",i,2.0*k1[i],2.0*k2[i],2.0*k3[i],2.0*k4[i]);
 }
 
+double DihedralOPLS::single(int, double) {
+  return 0;
+}

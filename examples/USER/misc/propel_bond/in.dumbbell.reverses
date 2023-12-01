@@ -1,0 +1,45 @@
+units lj
+dimension 3
+boundary p p p
+atom_style bond
+newton off
+
+comm_modify cutoff 1.8
+
+neighbor 1.0 bin
+neigh_modify every 1 delay 0 check yes
+
+variable seed equal 31415
+variable cutoff equal "2^(1.0/6.0)"
+
+region domain block -10 10 -10 10 -10 10
+create_box 1 domain &
+    bond/types 1 &
+    extra/bond/per/atom 1
+
+molecule dumbbell dumbbell.mol
+
+mass * 1.0
+
+pair_style lj/cut ${cutoff}
+pair_coeff * * 1.0 1.0
+pair_modify shift yes
+
+bond_style harmonic
+bond_coeff * 1000 1.0
+
+# Note that since we are using 'fix deposit' to create new molecules, we must
+# specify a value for the 'check' keyword of 'fix propel/bond' in order to make
+# sure that the new molecules also reverse direction correctly. Otherwise, new
+# molecules won't be active at all! This isn't necessary if new molecules aren't
+# being created during a run, or if the 'reverses' keyword isn't used.
+
+fix integrator  all nve
+fix viscosity   all viscous 10.0
+fix propulsion  all propel/bond 10.0 # reverses 1.0 ${seed} check 10
+fix insert      all deposit 400 0 10 ${seed} mol dumbbell region domain near 1.0
+
+dump 1 all atom 100 trajectory.dump
+
+timestep 1e-3
+run 10000

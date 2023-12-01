@@ -1,0 +1,54 @@
+variable seed equal 123
+variable cutoff equal "2^(1/6)"
+
+units lj
+dimension 2
+boundary p p p
+
+atom_style molecular
+
+read_data mesh.dat
+
+mass * 1.0
+
+group sheet type 1
+group dynamic id 26:600
+
+comm_modify cutoff 3.0
+
+print "test"
+
+pair_style lj/cut ${cutoff}
+pair_coeff * * 1.0 1.0 #${lj} ${lj}
+
+bond_style harmonic
+bond_coeff * ${k} ${cutoff}
+
+# bond_style fene/expand
+# bond_coeff * 100 0.5 0.0 0.0 1.0
+
+dihedral_style harmonic
+dihedral_coeff * 0 1 1
+
+
+special_bonds lj 1 1 1
+
+minimize 1e-6 1e-6 1000 1000
+reset_timestep 0
+
+fix 1 dynamic nve
+fix 2 sheet temp/rescale 1 1.0 1.0 0.05 1.0
+fix 3 sheet fluidize/mesh 100 0.1 31415
+fix 4 sheet addforce 0 3 0
+fix 5 sheet enforce2d
+
+compute 1 sheet property/local btype batom1 batom2
+
+dump 1 all custom 1000 trajectory.dump &
+    id type x y z vx vy vz fx fy fz
+
+dump 2 all local 1000 topology.dump index c_1[1] c_1[2] c_1[3]
+
+timestep 1e-3
+thermo 1000
+run 100000

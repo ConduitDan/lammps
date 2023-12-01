@@ -33,6 +33,7 @@ class DihedralHarmonic : public Dihedral {
   void write_restart(FILE *);
   virtual void read_restart(FILE *);
   void write_data(FILE *);
+  double single(int, double); //modeled after "single" function in bond.cpp
 
  protected:
   double *k,*cos_shift,*sin_shift;
