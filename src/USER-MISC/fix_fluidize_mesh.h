@@ -76,6 +76,7 @@ struct dihedral_type {
 
   int n_accept = 0;
   int n_reject = 0;
+  int n_skip = 0;
 
   double compute_bending_energy(dihedral_type);
 

@@ -341,8 +341,11 @@ void FixFluidizeMesh::swap_dihedral(dihedral_type &dihedral) {
   dihedral_type *exteriorDihedral3 = find_dihedral({c, d});
   dihedral_type *exteriorDihedral4 = find_dihedral({d, b});
   if (!(exteriorDihedral1 && exteriorDihedral2 && exteriorDihedral3 &&
-        exteriorDihedral4))
-    ERROR_ONE("couldn't find exterior dihedral while swapping back");
+        exteriorDihedral4)){
+          return;
+          //ERROR_ONE("couldn't find exterior dihedral while swapping back");
+        }
+    
   // flip the central dihedral
   flip_central_dihedral(dihedral);
 
@@ -369,8 +372,12 @@ double FixFluidizeMesh::swap_dihedral_calc_E(dihedral_type &dihedral) {
   dihedral_type *exteriorDihedral3 = find_dihedral({c, d});
   dihedral_type *exteriorDihedral4 = find_dihedral({d, b});
   if (!(exteriorDihedral1 && exteriorDihedral2 && exteriorDihedral3 &&
-        exteriorDihedral4))
-    ERROR_ONE("couldn't find exterior dihedral");
+        exteriorDihedral4)){
+          n_skip++;
+
+          return 0;
+        }
+    
 
   old_n1 = *exteriorDihedral1;
   old_n2 = *exteriorDihedral2;
@@ -535,6 +542,11 @@ bool FixFluidizeMesh::check_bond_length(bond_type bond) {
 void FixFluidizeMesh::try_swap(dihedral_type &dihedral) {
   // make the swap and calculate the change of energy
   double deltaE = swap_dihedral_calc_E(dihedral);
+  // not a valid swap
+  if (isnan(deltaE)){
+    return;
+  }
+
   // check acceptance based on energy change
   if (!accept_change(deltaE)) {
     // if we reject swap back (no need to calculate energy here)
@@ -556,7 +568,8 @@ void FixFluidizeMesh::try_swap(dihedral_type &dihedral) {
 void FixFluidizeMesh::print_p_acc() {
   std::cout << "No. swaps accepted: " << n_accept << std::endl;
   std::cout << "No. swaps rejected: " << n_reject << std::endl;
-  std::cout << "Acceptance ratio: " << (1.0 * n_accept) / (n_accept + n_reject)
+  std::cout << "No. swaps skipped due to no neighbors: " << n_skip << std::endl;
+  std::cout << "Acceptance ratio: " << (1.0 * n_accept) / (n_accept + n_reject+1e-16)
             << std::endl;
 }
 
