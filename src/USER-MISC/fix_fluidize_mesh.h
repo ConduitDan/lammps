@@ -74,9 +74,9 @@ struct dihedral_type {
   std::vector<dihedral_type> _dihedralList;
   std::vector<int> _connectivity;
 
-  int n_accept = 0;
-  int n_reject = 0;
-  int n_skip = 0;
+  long long n_accept = 0;
+  long long n_reject = 0;
+  long long n_skip = 0;
 
   double compute_bending_energy(dihedral_type);
 
