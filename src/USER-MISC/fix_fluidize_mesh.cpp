@@ -255,7 +255,7 @@ void FixFluidizeMesh::post_integrate() {
     int index = random->integer(atom->ndihedrals);
 
     // This is like an attempt frequency -- sets overall rate
-    if (random->uniform() > swap_probability) {
+    if (random->uniform() >= swap_probability) {
       continue;
     }
 
@@ -566,11 +566,14 @@ void FixFluidizeMesh::try_swap(dihedral_type &dihedral) {
 /* ---------------------------------------------------------------------- */
 // print acceptance probability
 void FixFluidizeMesh::print_p_acc() {
-  std::cout << "No. swaps accepted: " << n_accept << std::endl;
-  std::cout << "No. swaps rejected: " << n_reject << std::endl;
-  std::cout << "No. swaps skipped due to no neighbors: " << n_skip << std::endl;
-  std::cout << "Acceptance ratio: " << (1.0 * n_accept) / (n_accept + n_reject+1e-16)
-            << std::endl;
+  utils::logmesg( "No. swaps accepted: {}\n",n_accept);
+  utils::logmesg( "No. swaps rejected: {}\n",n_reject);
+  utils::logmesg( "Acceptance ratio: {}\n",(1.0 * n_accept) / (n_accept + n_reject+1e-16));
+  // std::cout << "No. swaps accepted: " << n_accept << std::endl;
+  // std::cout << "No. swaps rejected: " << n_reject << std::endl;
+  // std::cout << "No. swaps skipped due to no neighbors: " << n_skip << std::endl;
+  // std::cout << "Acceptance ratio: " << (1.0 * n_accept) / (n_accept + n_reject+1e-16)
+  //           << std::endl;
 }
 
 /* ---------------------------------------------------------------------- */
