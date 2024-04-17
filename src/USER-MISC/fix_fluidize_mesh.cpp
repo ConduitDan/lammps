@@ -189,7 +189,7 @@ void FixFluidizeMesh::post_integrate() {
 
   bool skip;
   int a, b, c, d;
-  int n_accept_old = n_accept;
+  long long n_accept_old = n_accept;
   // construct a list of dihedrals and a corrsponding map from atom to all the
   // dihedrals it owns. this allows us random access into the full list of
   // dihedrals.
@@ -202,38 +202,67 @@ void FixFluidizeMesh::post_integrate() {
   std::fill(_connectivity.begin(), _connectivity.end(), 0);
   _dihedralList.resize(atom->ndihedrals);
 
+  // we have to keep track of dihedrals that we don't want to flip for neighbor purposes.
+  // they get added on to the end of the list;
+
+  int non_flipping_dihdedral_count = 0;
+
 
   for (int i_det = 0; i_det < atom->nlocal; ++i_det) {  // for each atom
-    if (!(atom->mask[i_det] & groupbit))
+    if (!(atom->mask[i_det] & groupbit)) {
       continue;  // if this fix doesn't apply to this type of atom
-      // also update the connectivity for the bonds
-      _connectivity[i_det] += atom->num_bond[i_det];
-      for (int bond_num = 0; bond_num < atom->num_bond[i_det]; bond_num++){
-        _connectivity[atom->map(atom->bond_atom[i_det][bond_num])]++; 
-      }
+    }
+    // update the connectivity for the bonds
+    _connectivity[i_det] += atom->num_bond[i_det];
+    for (int bond_num = 0; bond_num < atom->num_bond[i_det]; bond_num++){
+      _connectivity[atom->map(atom->bond_atom[i_det][bond_num])]++; 
+    }
     if (atom->num_dihedral[i_det] == 0)
       continue;  // if this atom doesn't have dihedrals continue
 
     for (int j_det = 0; j_det < atom->num_dihedral[i_det]; ++j_det) {  // for each dihedral on atom i_det
-      if (atom->dihedral_atom2[i_det][j_det] != atom->tag[i_det])
+      if (atom->dihedral_atom2[i_det][j_det] != atom->tag[i_det]) {
         continue;  // I guess check if this diheardal exists?
-      if (dihedral_cnt >= atom->ndihedrals)
+      }
+      if (dihedral_cnt >= atom->ndihedrals){
         ERROR_ALL("double counting dihedrals");
+      }
       a = atom->map(atom->dihedral_atom1[i_det][j_det]);
       b = atom->map(atom->dihedral_atom2[i_det][j_det]);
       c = atom->map(atom->dihedral_atom3[i_det][j_det]);
       d = atom->map(atom->dihedral_atom4[i_det][j_det]);
-      _dihedralList[dihedral_cnt] = {a, b, c, d};
-      _dihedralList[dihedral_cnt].type = atom->dihedral_type[b][j_det];
-      _dihedralList[dihedral_cnt].index = j_det;
+      skip = false;
+      for (int id : {a,b,c,d}){
+        if ((id >= atom->nlocal) || !(atom->mask[id] & groupbit)) {
+          // avoid dihedrals connected to atoms we want to skip.
+          skip = true;
+          break;
+        }
+      }
+      if (skip) {
+        _dihedralList[_dihedralList.size()-1-non_flipping_dihdedral_count] = {a, b, c, d};
+        _dihedralList[_dihedralList.size()-1-non_flipping_dihdedral_count].type = atom->dihedral_type[b][j_det];
+        _dihedralList[_dihedralList.size()-1-non_flipping_dihdedral_count].index = j_det;
 
-      _atomToDihedral[b].insert(&_dihedralList[dihedral_cnt]);
+        _atomToDihedral[b].insert(&_dihedralList[_dihedralList.size()-1-non_flipping_dihdedral_count]);
 
-      dihedral_cnt++;
+        non_flipping_dihdedral_count++;
+
+      }
+      else {
+        _dihedralList[dihedral_cnt] = {a, b, c, d};
+        _dihedralList[dihedral_cnt].type = atom->dihedral_type[b][j_det];
+        _dihedralList[dihedral_cnt].index = j_det;
+
+        _atomToDihedral[b].insert(&_dihedralList[dihedral_cnt]);
+
+        dihedral_cnt++;
+      }
     }
 
 
   }
+  int num_valid_dihedrals = 0;
 
 
 
@@ -250,12 +279,13 @@ void FixFluidizeMesh::post_integrate() {
   }
 
 
-  for (int count = 0; count < atom->ndihedrals; count++) {
+  for (int count = 0; count < dihedral_cnt; count++) {
     // Choose a dihedral at random; i = [0, ndihedral - 1]
-    int index = random->integer(atom->ndihedrals);
+    int index = random->integer(dihedral_cnt);
 
     // This is like an attempt frequency -- sets overall rate
     if (random->uniform() > swap_probability) {
+      n_reject++;
       continue;
     }
 
@@ -264,22 +294,16 @@ void FixFluidizeMesh::post_integrate() {
     c = _dihedralList[index].atoms[2];
     d = _dihedralList[index].atoms[3];
 
-    skip = false;
     for (int id : {a, b, c, d}) {
       if (id < 0)
         ERROR_ONE("fix fluidize/mesh needs a larger communication cutoff!");
-
-      if ((id >= atom->nlocal) || !(atom->mask[id] & groupbit)) {
-        skip = true;
-        break;
-      }
     }
     // Make an attempt to flip the bond
-    if (!skip) {
-      if (check_candidacy(_dihedralList[index])) {
-        try_swap(_dihedralList[index]);
-      }
+    
+    if (check_candidacy(_dihedralList[index])) {
+      try_swap(_dihedralList[index]);
     }
+    
   }
   if (debug) {
     file.close();
@@ -567,8 +591,10 @@ void FixFluidizeMesh::try_swap(dihedral_type &dihedral) {
 // print acceptance probability
 void FixFluidizeMesh::print_p_acc() {
   std::cout << "No. swaps accepted: " << n_accept << std::endl;
-  std::cout << "No. swaps rejected: " << n_reject << std::endl;
+  std::cout << "No. swaps rejected or skipped: " << n_reject << std::endl;
   std::cout << "No. swaps skipped due to no neighbors: " << n_skip << std::endl;
+  std::cout << "Swap attempt rate: "<< swap_probability << std::endl;
+  std::cout << "Swap frequency: every "<< nevery <<" time step(s)"<<std::endl;
   std::cout << "Acceptance ratio: " << (1.0 * n_accept) / (n_accept + n_reject+1e-16)
             << std::endl;
 }
