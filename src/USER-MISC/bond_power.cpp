@@ -163,7 +163,7 @@ void BondPower::allocate()
 
 void BondPower::coeff(int narg, char **arg)
 {
-  if (narg != 5 && narg != 6) error->all(FLERR,"Incorrect args for bond coefficients");
+  if (narg != 5) error->all(FLERR,"Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo,ihi;

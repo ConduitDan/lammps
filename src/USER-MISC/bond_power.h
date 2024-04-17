@@ -25,7 +25,7 @@
 
 #ifdef BOND_CLASS
 
-BondStyle(sw,BondPower)
+BondStyle(power,BondPower)
 
 #else
 
