@@ -154,6 +154,8 @@ void BondPower::allocate()
   memory->create(lmin,n+1,"bond:lmin");
   memory->create(lmax,n+1,"bond:lmax");
   memory->create(r,n+1,"bond:r");
+  memory->create(setflag,n+1,"bond:setflag");
+
   for (int i = 1; i <= n; i++) setflag[i] = 0;
 }
 
