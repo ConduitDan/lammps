@@ -105,7 +105,7 @@ void BondPower::compute(int eflag, int vflag)
       
       u = k[type]*std::pow(lc1-l,r_0)*std::pow(r_0,1+r_0);
 
-      fbond -= -k[type]*std::pow(lc1-l,r_0-1)*std::pow(r_0,2+r_0);
+      fbond += k[type]*std::pow(lc1-l,r_0-1)*std::pow(r_0,2+r_0);
       if (eflag) {
         ebond += u;
       }
@@ -269,7 +269,7 @@ double BondPower::single(int type, double rsq, int /*i*/, int /*j*/,
   double lc0 = lmax[type];
   double r_0 = r[type];
   double eng = 0.0;
-
+  fforce = 0;
     if (l < lc1) {
       if (l <= 0.5 * lc1) {
         LOGWARN("Bond very short at step {}: {}", update->ntimestep, l);
@@ -278,6 +278,8 @@ double BondPower::single(int type, double rsq, int /*i*/, int /*j*/,
       
       u = k[type]*std::pow(lc1-l,r_0)*std::pow(r_0,1+r_0);
       eng += u;
+      fforce += k[type]*std::pow(lc1-l,r_0-1)*std::pow(r_0,2+r_0);
+      
     }
     if (l > lc0) {
       if (l >= 2 * lc0) {
@@ -287,6 +289,8 @@ double BondPower::single(int type, double rsq, int /*i*/, int /*j*/,
       
       u = k[type]*std::pow(l-lc0,r_0)*std::pow(r_0,1+r_0);
       eng += u;
+      fforce -= k[type]*std::pow(l-lc0,r_0-1)*std::pow(r_0,2+r_0);
+
     }
 
   return eng;
