@@ -578,6 +578,13 @@ void FixFluidizeMesh::try_swap(dihedral_type &dihedral) {
     n_reject++;
     return;
   }
+  //we've now accepted the flip, time to check the forces on the nodes. We'll just report the force of the bond before and the force of the bond now
+  utils::logmesg(lmp, "Accepted A swap: {}-{} -> {}-{}\t",dihedral.atoms[1],dihedral.atoms[2],dihedral.atoms[0],dihedral.atoms[3]);
+  double f0 = calculate_bond_force(dihedral.atoms[1],dihedral.atoms[2]);
+  double f1 = calculate_bond_force(dihedral.atoms[0],dihedral.atoms[3]);
+  utils::logmesg(lmp, "Old Bond Force: {}, New bond Force: {}",f0,f1);
+
+
   n_accept++;
   next_reneighbor = update->ntimestep;
   if (debug) report_swap(dihedral,deltaE);
@@ -743,6 +750,33 @@ double FixFluidizeMesh::compute_bond_energy(bond_type bond) {
 
   return energy;
 }
+
+/* ---------------------------------------------------------------------- */
+
+double FixFluidizeMesh::compute_bond_force(bond_type bond) {
+  int a = bond.atoms[0];
+  int b = bond.atoms[1];
+
+  double dx = atom->x[b][0] - atom->x[a][0];
+  double dy = atom->x[b][1] - atom->x[a][1];
+  double dz = atom->x[b][2] - atom->x[a][2];
+  domain->minimum_image(dx, dy, dz);
+
+  double f = 0;  
+  double r2 = dx * dx + dy * dy + dz * dz;
+
+  double energy = 0.0;
+  if (force->bond) {
+    if ((rmax2 > 0 && r2 > rmax2) || (rmin2 > 0 && r2 < rmin2)) {
+      energy += std::numeric_limits<double>::infinity();
+      f = std::numeric_limits<double>::infinity();
+    } else {
+      energy += force->bond->single(bond.type, r2, a, b, f);
+    }
+  }
+  return f;
+}
+
 
 /* ---------------------------------------------------------------------- */
 
@@ -1045,7 +1079,7 @@ bool FixFluidizeMesh::check_candidacy(dihedral_type dihedral){
   c = atoms[2];
   d = atoms[3];
   // check the connectivity on b and c, we want to avoid them becoming degenerate. It should not get less than 3, (this can cause degenercy of bonds)
-  // if the new bond already exisits than this flip would make us degenerate. Skip
+  // if the new bond already exists than this flip would make us degenerate. Skip
 
   
   bond_type new_bond = {a, d};\

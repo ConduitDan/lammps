@@ -95,6 +95,7 @@ struct dihedral_type {
   void insert_bond(bond_type);
   bool check_bond_length(bond_type);
   double compute_bond_energy(bond_type bond);
+  double compute_bond_force(bond_type bond);
 
   dihedral_type *find_dihedral(bond_type centralBond);
   void remove_dihedral(dihedral_type &);
