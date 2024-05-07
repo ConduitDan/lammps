@@ -115,7 +115,7 @@ void BondPower::compute(int eflag, int vflag)
         LOGWARN("Bond very long at step {}: {} ({}, {})",
           update->ntimestep, l, atom->tag[i1], atom->tag[i2]
         );
-        if (l >= 4 * lc0) ERROR_ONE("Bad Power bond");
+        if (l >= 4 * lc0) ERROR_ALL("Bad Power bond");
       }
       
       u = k[type]*std::pow(l-lc0,r_0)*std::pow(r_0,1+r_0);
@@ -283,8 +283,8 @@ double BondPower::single(int type, double rsq, int /*i*/, int /*j*/,
     }
     if (l > lc0) {
       if (l >= 2 * lc0) {
-        LOGWARN("Bond very long at step {}: {}", update->ntimestep, l);
-        if (l >= 4 * lc0) ERROR_ONE("Bad Power bond");
+        LOGWARN("Bond very long at step {}: {}>>{}", update->ntimestep, l,lc0);
+        if (l >= 4 * lc0) ERROR_ALL("Bad Power bond");
       }
       
       u = k[type]*std::pow(l-lc0,r_0)*std::pow(r_0,1+r_0);
