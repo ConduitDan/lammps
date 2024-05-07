@@ -87,7 +87,6 @@ void BondPower::compute(int eflag, int vflag)
     dx = x[i1][0] - x[i2][0];
     dy = x[i1][1] - x[i2][1];
     dz = x[i1][2] - x[i2][2];
-    domain->minimum_image(dx, dy, dz);
 
     r2 = dx*dx + dy*dy + dz*dz;
     l = std::sqrt(r2);
