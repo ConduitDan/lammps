@@ -579,10 +579,21 @@ void FixFluidizeMesh::try_swap(dihedral_type &dihedral) {
     return;
   }
   //we've now accepted the flip, time to check the forces on the nodes. We'll just report the force of the bond before and the force of the bond now
+  bond_type centralBond = {dihedral.atoms[1],dihedral.atoms[2]}
+  find_bond(centralBond);
+
   utils::logmesg(lmp, "Accepted A swap: {}-{} -> {}-{}\n",dihedral.atoms[1],dihedral.atoms[2],dihedral.atoms[0],dihedral.atoms[3]);
-  double f0 = compute_bond_force({dihedral.atoms[1],dihedral.atoms[2]});
-  double f1 = compute_bond_force({dihedral.atoms[0],dihedral.atoms[3]});
+  bond_type old_bond = centralBond;
+  old_bond.atoms[0] = dihedral.atoms[0]; 
+  old_bond.atoms[1] = dihedral.atoms[3];
+
+  double f1 = compute_bond_force(centralBond);
+  double f0 = compute_bond_force(old_bond);
+  double e1 = compute_bond_energy(centralBond);
+  double e0 = compute_bond_energy(old_bond);
+
   utils::logmesg(lmp, "Old Bond Force: {}, New bond Force: {}\n",f0,f1);
+  utils::logmesg(lmp, "Old Bond E: {}, New bond E: {}\n",e0,e1);
 
 
   n_accept++;
