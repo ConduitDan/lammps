@@ -720,9 +720,9 @@ double FixFluidizeMesh::compute_bond_energy(bond_type bond) {
 
   double energy = 0.0;
   if (force->bond) {
-    if ((rmax2 > 0 && r2 > rmax2) || (rmin2 > 0 && r2 < rmin2)) {
-      energy += std::numeric_limits<double>::infinity();
-    } else {
+    // if ((rmax2 > 0 && r2 > rmax2) || (rmin2 > 0 && r2 < rmin2)) {
+    //   energy += std::numeric_limits<double>::infinity();
+    // } else {
       energy += force->bond->single(bond.type, r2, a, b, f);
       
       if (debug) {
@@ -756,7 +756,7 @@ double FixFluidizeMesh::compute_bond_energy(bond_type bond) {
         }
 
       }
-    }
+    // }
   }
 
   return energy;
