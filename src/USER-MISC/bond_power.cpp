@@ -105,7 +105,7 @@ void BondPower::compute(int eflag, int vflag)
       
       u = k[type]*std::pow(lc1-l,r_0)*std::pow(r_0,1+r_0);
 
-      fbond += k[type]*std::pow(lc1-l,r_0-1)*std::pow(r_0,2+r_0);
+      fbond += k[type]*std::pow(lc1-l,r_0-1)*std::pow(r_0,2+r_0)/l;
       if (eflag) {
         ebond += u;
       }
@@ -120,7 +120,7 @@ void BondPower::compute(int eflag, int vflag)
       
       u = k[type]*std::pow(l-lc0,r_0)*std::pow(r_0,1+r_0);
 
-      fbond -= k[type]*std::pow(l-lc0,r_0-1)*std::pow(r_0,2+r_0);
+      fbond -= k[type]*std::pow(l-lc0,r_0-1)*std::pow(r_0,2+r_0)/l;
       if (eflag) {
         ebond += u;
       }
@@ -202,7 +202,8 @@ void BondPower::init_style()
   if (force->special_lj[1] != 0.0 || force->special_lj[2] != 1.0 ||
       force->special_lj[3] != 1.0) {
     if (comm->me == 0)
-      error->warning(FLERR,"Use special bonds = 0,1,1 with bond style sw");
+      error->warning(FLERR,"Use special bonds = 0,1,1 with bond style power, special bonds should be 0 1 1 (exclude pair interactions between directly bonded atoms, but not between next-nearest and next-next-nearest neighbors.)");
+      error->warning(FLERR,"You are using special bonds = {},{},{}",force->special_lj[1],force->special_lj[2],force->special_lj[3]);
   }
 }
 
@@ -278,7 +279,7 @@ double BondPower::single(int type, double rsq, int /*i*/, int /*j*/,
       
       u = k[type]*std::pow(lc1-l,r_0)*std::pow(r_0,1+r_0);
       eng += u;
-      fforce += k[type]*std::pow(lc1-l,r_0-1)*std::pow(r_0,2+r_0);
+      fforce += k[type]*std::pow(lc1-l,r_0-1)*std::pow(r_0,2+r_0)/l;
       
     }
     if (l > lc0) {
@@ -289,7 +290,7 @@ double BondPower::single(int type, double rsq, int /*i*/, int /*j*/,
       
       u = k[type]*std::pow(l-lc0,r_0)*std::pow(r_0,1+r_0);
       eng += u;
-      fforce -= k[type]*std::pow(l-lc0,r_0-1)*std::pow(r_0,2+r_0);
+      fforce -= k[type]*std::pow(l-lc0,r_0-1)*std::pow(r_0,2+r_0)/l;
 
     }
 
