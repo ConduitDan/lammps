@@ -203,7 +203,7 @@ void BondPower::init_style()
       force->special_lj[3] != 1.0) {
     if (comm->me == 0)
       error->warning(FLERR,"Use special bonds = 0,1,1 with bond style power, special bonds should be 0 1 1 (exclude pair interactions between directly bonded atoms, but not between next-nearest and next-next-nearest neighbors.)");
-      error->warning(FLERR,"You are using special bonds = {},{},{}",force->special_lj[1],force->special_lj[2],force->special_lj[3]);
+      // error->warning(FLERR,"You are using special bonds = {},{},{}",force->special_lj[1],force->special_lj[2],force->special_lj[3]);
   }
 }
 
