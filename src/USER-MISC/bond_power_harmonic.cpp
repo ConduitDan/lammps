@@ -15,7 +15,7 @@
    Contributed by Matthew S.E. Peterson @ Brandeis University
 ------------------------------------------------------------------------- */
 
-#include "bond_power.h"
+#include "bond_power_harmonic.h"
 
 #include <cmath>
 #include <cstring>
@@ -37,7 +37,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-BondPower::BondPower(LAMMPS *lmp)
+BondPowerHarmonic::BondPowerHarmonic(LAMMPS *lmp)
   : Bond(lmp),
   k{nullptr},
   lmin{nullptr},
@@ -47,7 +47,7 @@ BondPower::BondPower(LAMMPS *lmp)
 
 /* ---------------------------------------------------------------------- */
 
-BondPower::~BondPower()
+BondPowerHarmonic::~BondPowerHarmonic()
 {
   if (allocated && !copymode) {
     memory->destroy(setflag);
@@ -60,7 +60,7 @@ BondPower::~BondPower()
 
 /* ---------------------------------------------------------------------- */
 
-void BondPower::compute(int eflag, int vflag)
+void BondPowerHarmonic::compute(int eflag, int vflag)
 {
   int i1,i2,n,type;
   double u, lc0, lc1;
@@ -125,6 +125,8 @@ void BondPower::compute(int eflag, int vflag)
         ebond += u;
       }
     }
+    ebond+=0.5*k[type]*(l-equilibrium_distance(type))*(l-equilibrium_distance(type));
+    fbond+=-k[type]*(l-equilibrium_distance(type))/l;
 
     // apply force to each of 2 atoms
     if (newton_bond || i1 < nlocal) {
@@ -145,7 +147,7 @@ void BondPower::compute(int eflag, int vflag)
 
 /* ---------------------------------------------------------------------- */
 
-void BondPower::allocate()
+void BondPowerHarmonic::allocate()
 {
   allocated = 1;
   int n = atom->nbondtypes;
@@ -163,7 +165,7 @@ void BondPower::allocate()
    set coeffs for one type
 ------------------------------------------------------------------------- */
 
-void BondPower::coeff(int narg, char **arg)
+void BondPowerHarmonic::coeff(int narg, char **arg)
 {
   if (narg != 5) error->all(FLERR,"Incorrect args for bond coefficients");
   if (!allocated) allocate();
@@ -193,7 +195,7 @@ void BondPower::coeff(int narg, char **arg)
    check if special_bond settings are valid
 ------------------------------------------------------------------------- */
 
-void BondPower::init_style()
+void BondPowerHarmonic::init_style()
 {
   // special bonds should be 0 1 1
   //(exclude pair interactions between directly bonded atoms,
@@ -209,7 +211,7 @@ void BondPower::init_style()
 
 /* ---------------------------------------------------------------------- */
 
-double BondPower::equilibrium_distance(int i)
+double BondPowerHarmonic::equilibrium_distance(int i)
 {
   return 0.5 * (lmin[i] + lmax[i]);
 }
@@ -218,7 +220,7 @@ double BondPower::equilibrium_distance(int i)
    proc 0 writes to restart file
 ------------------------------------------------------------------------- */
 
-void BondPower::write_restart(FILE *fp)
+void BondPowerHarmonic::write_restart(FILE *fp)
 {
   fwrite(&k[1],sizeof(double),atom->nbondtypes,fp);
   fwrite(&lmin[1],sizeof(double),atom->nbondtypes,fp);
@@ -230,7 +232,7 @@ void BondPower::write_restart(FILE *fp)
    proc 0 reads from restart file, bcasts
 ------------------------------------------------------------------------- */
 
-void BondPower::read_restart(FILE *fp)
+void BondPowerHarmonic::read_restart(FILE *fp)
 {
   allocate();
 
@@ -252,7 +254,7 @@ void BondPower::read_restart(FILE *fp)
    proc 0 writes to data file
 ------------------------------------------------------------------------- */
 
-void BondPower::write_data(FILE *fp)
+void BondPowerHarmonic::write_data(FILE *fp)
 {
   for (int i = 1; i <= atom->nbondtypes; i++)
     fprintf(fp,"%d %g %g %g %d\n", i, k[i], lmin[i], lmax[i], r[i]);
@@ -260,7 +262,7 @@ void BondPower::write_data(FILE *fp)
 
 /* ---------------------------------------------------------------------- */
 
-double BondPower::single(int type, double rsq, int /*i*/, int /*j*/,
+double BondPowerHarmonic::single(int type, double rsq, int /*i*/, int /*j*/,
                         double &fforce)
 {
   double a, b, c, u;
@@ -273,8 +275,8 @@ double BondPower::single(int type, double rsq, int /*i*/, int /*j*/,
   fforce = 0;
     if (l < lc1) {
       // if (l <= 0.5 * lc1) {
-      //   LOGWARN("Bond very short at step {}: {}", update->ntimestep, l);
-      //   if (l <= 0.25 * lc1) ERROR_ONE("Bad Power bond");
+        // LOGWARN("Bond very short at step {}: {}", update->ntimestep, l);
+        // if (l <= 0.25 * lc1) ERROR_ONE("Bad Power bond");
       // }
       
       u = k[type]*std::pow(lc1-l,r_0)*std::pow(r_0,1+r_0);
@@ -284,8 +286,8 @@ double BondPower::single(int type, double rsq, int /*i*/, int /*j*/,
     }
     if (l > lc0) {
       // if (l >= 2 * lc0) {
-      //   LOGWARN("Bond very long at step {}: {}>>{}", update->ntimestep, l,lc0);
-      //   if (l >= 4 * lc0) ERROR_ALL("Bad Power bond");
+        // LOGWARN("Bond very long at step {}: {}>>{}", update->ntimestep, l,lc0);
+        // if (l >= 4 * lc0) ERROR_ALL("Bad Power bond");
       // }
       
       u = k[type]*std::pow(l-lc0,r_0)*std::pow(r_0,1+r_0);
@@ -293,13 +295,14 @@ double BondPower::single(int type, double rsq, int /*i*/, int /*j*/,
       fforce -= k[type]*std::pow(l-lc0,r_0-1)*std::pow(r_0,2+r_0)/l;
 
     }
-
+  eng+=0.5*k[type]*(l-equilibrium_distance(type))*(l-equilibrium_distance(type));
+  fforce+=-k[type]*(l-equilibrium_distance(type))/l;
   return eng;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void *BondPower::extract(const char *str, int &dim)
+void *BondPowerHarmonic::extract(const char *str, int &dim)
 {
   dim = 1;
   if (strcmp(str,"k")==0) return (void*) k;

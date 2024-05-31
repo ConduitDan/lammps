@@ -261,6 +261,7 @@ void FixFluidizeMesh::post_integrate() {
     }
 
 
+
   }
   int num_valid_dihedrals = 0;
 
@@ -278,22 +279,24 @@ void FixFluidizeMesh::post_integrate() {
     file.open(name,std::fstream::out);
   }
 
-
+  // utils::logmesg(lmp,"found {} flippable dihedrals\n",dihedral_cnt);
   for (int count = 0; count < dihedral_cnt; count++) {
     // Choose a dihedral at random; i = [0, ndihedral - 1]
     int index = random->integer(dihedral_cnt);
+    // utils::logmesg(lmp,"Chose dihedral {} \n",index);
 
     // This is like an attempt frequency -- sets overall rate
     if (random->uniform() > swap_probability) {
-      n_reject++;
+      // utils::logmesg(lmp,"rejected due to swap_probablity\n");
+      // n_reject++;
       continue;
     }
-
+    
     a = _dihedralList[index].atoms[0];
     b = _dihedralList[index].atoms[1];
     c = _dihedralList[index].atoms[2];
     d = _dihedralList[index].atoms[3];
-
+  // utils::logmesg(lmp,"this is dihedral {}, {}, {}, {}\n",a,b,c,d);
     for (int id : {a, b, c, d}) {
       if (id < 0)
         ERROR_ONE("fix fluidize/mesh needs a larger communication cutoff!");
@@ -302,11 +305,17 @@ void FixFluidizeMesh::post_integrate() {
     
     if (check_candidacy(_dihedralList[index])) {
       try_swap(_dihedralList[index]);
+    } else {
+      // utils::logmesg(lmp,"rejected {}, {}, {}, {}  due to candidacy (couldn't find supporting bonds or bond lenght was bad)\n",a,b,c,d);
+
     }
     
   }
   if (debug) {
     file.close();
+  }
+  if (n_accept>n_accept_old){
+    neighbor->build_topology();
   }
 
   // std::cout << "Fluidization made " << n_accept - n_accept_old << " flips"
@@ -383,6 +392,7 @@ void FixFluidizeMesh::swap_dihedral(dihedral_type &dihedral) {
 /* ---------------------------------------------------------------------- */
 
 double FixFluidizeMesh::swap_dihedral_calc_E(dihedral_type &dihedral) {
+  
   // swaps a dihedral and returns the change in energy
   tagint a, b, c, d;
   tagint *atoms = dihedral.atoms;
@@ -390,6 +400,7 @@ double FixFluidizeMesh::swap_dihedral_calc_E(dihedral_type &dihedral) {
   b = atoms[1];
   c = atoms[2];
   d = atoms[3];
+  // utils::logmesg(lmp,"trying to flip {},{},{},{}\n",a,b,c,d);
   // find the exterior dihedrals by their center bonds
   dihedral_type *exteriorDihedral1 = find_dihedral({b, a});
   dihedral_type *exteriorDihedral2 = find_dihedral({a, c});
@@ -447,6 +458,8 @@ double FixFluidizeMesh::swap_dihedral_calc_E(dihedral_type &dihedral) {
   if (!isinf(deltaE)) deltaE += compute_bending_energy(*exteriorDihedral2);
   if (!isinf(deltaE)) deltaE += compute_bending_energy(*exteriorDihedral3);
   if (!isinf(deltaE)) deltaE += compute_bending_energy(*exteriorDihedral4);
+
+  // utils::logmesg(lmp,"delta E is {}\n",deltaE);
 
   return deltaE;
 }
@@ -556,6 +569,9 @@ bool FixFluidizeMesh::check_bond_length(bond_type bond) {
   domain->minimum_image(dx, dy, dz);
   double r2 = dx * dx + dy * dy + dz * dz;
   if (r2 < rmin2 || r2 > rmax2) {
+      // utils::logmesg(lmp,"bad bond length");
+
+      // utils::logmesg(lmp,"bond length bad! rsq = {}\n",r2);
     return false;
   }
   return true;
@@ -579,27 +595,28 @@ void FixFluidizeMesh::try_swap(dihedral_type &dihedral) {
     return;
   }
   //we've now accepted the flip, time to check the forces on the nodes. We'll just report the force of the bond before and the force of the bond now
-  bond_type centralBond = {dihedral.atoms[1],dihedral.atoms[2]};
-  find_bond(centralBond);
+  // bond_type centralBond = {dihedral.atoms[1],dihedral.atoms[2]};
+  // find_bond(centralBond);
 
   
-  bond_type old_bond = centralBond;
-  old_bond.atoms[0] = dihedral.atoms[0]; 
-  old_bond.atoms[1] = dihedral.atoms[3];
+  // bond_type old_bond = centralBond;
+  // old_bond.atoms[0] = dihedral.atoms[0]; 
+  // old_bond.atoms[1] = dihedral.atoms[3];
 
-  double f1 = compute_bond_force(centralBond);
-  double f0 = compute_bond_force(old_bond);
-  double e1 = compute_bond_energy(centralBond);
-  double e0 = compute_bond_energy(old_bond);
-  if (fabs(f1) || fabs(f0) > 10) {
-    swap_dihedral(dihedral);
-    n_reject++;
-    return;
+  // double f1 = compute_bond_force(centralBond);
+  // double f0 = compute_bond_force(old_bond);
+  // double e1 = compute_bond_energy(centralBond);
+  // double e0 = compute_bond_energy(old_bond);
+  // if (fabs(f1) || fabs(f0) > 10) {
+  //   swap_dihedral(dihedral);
+  //   n_reject++;
+  //   // ;
 
-    // utils::logmesg(lmp, "Accepted A swap with a large force change: {}-{} -> {}-{} at step {}\n",dihedral.atoms[1],dihedral.atoms[2],dihedral.atoms[0],dihedral.atoms[3],update->ntimestep);
-    // utils::logmesg(lmp, "Old Bond Force: {}, New bond Force: {}\n",f0,f1);
-    // utils::logmesg(lmp, "Old Bond E: {}, New bond E: {}\n",e0,e1);
-  }
+  //   // utils::logmesg(lmp, "Accepted A swap with a large force change: {}-{} -> {}-{} at step {}\n",dihedral.atoms[1],dihedral.atoms[2],dihedral.atoms[0],dihedral.atoms[3],update->ntimestep);
+  //   // utils::logmesg(lmp, "Old Bond Force: {}, New bond Force: {}\n",f0,f1);
+  //   // utils::logmesg(lmp, "Old Bond E: {}, New bond E: {}\n",e0,e1);
+  //   return;
+  // }
 
   n_accept++;
   next_reneighbor = update->ntimestep;
@@ -725,43 +742,8 @@ double FixFluidizeMesh::compute_bond_energy(bond_type bond) {
 
   double energy = 0.0;
   if (force->bond) {
-    // if ((rmax2 > 0 && r2 > rmax2) || (rmin2 > 0 && r2 < rmin2)) {
-    //   energy += std::numeric_limits<double>::infinity();
-    // } else {
       energy += force->bond->single(bond.type, r2, a, b, f);
       
-      if (debug) {
-        // do my own energy calculation 
-        double r = sqrt(r2);
-        double rmin = sqrt(rmin2);
-        double rmax = sqrt(rmax2);
-        // hardcoded valuse for right now
-        double delta = 0.5;
-        double sigma = 10000;
-        double leq = 1;
-        double k = 100;
-        double E = 0;
-        double E_repulsive = 0;
-        double E_attractive = 0;
-        double E_spring = 0;
-        if (r<rmin+delta) E_repulsive= sigma*exp(1.0/(r-(rmin+delta)))/(r-rmin);
-        if (r>rmax-delta) E_attractive= sigma*exp(1.0/((rmax-delta)-r))/(rmax-r);
-        E_spring =(r-leq)*(r-leq)*0.5*k;
-        E = E_repulsive+E_attractive+E_spring;
-
-        if ((abs(energy-E)/std::max(abs(energy),abs(E)))>1e-4){
-          std::cout<<"I think it should be "<<E<<" Lammps says "<<energy<<std::endl;
-          std::cout<<"R = "<<r<<std::endl;
-          std::cout<<"E_repulsive = "<<E_repulsive<<std::endl;
-          std::cout<<"E_attractive = "<<E_attractive<<std::endl;
-          std::cout<<"E_spring = "<<E_spring<<std::endl;
-           
-          ERROR_ALL("Bad Energy Calculation");
-
-        }
-
-      }
-    // }
   }
 
   return energy;
@@ -1094,9 +1076,11 @@ bool FixFluidizeMesh::check_candidacy(dihedral_type dihedral){
 
   
   bond_type new_bond = {a, d};\
-  if (_connectivity[b]<5||_connectivity[c]<5) return false;
+  // if (_connectivity[b]<5||_connectivity[c]<5) return false;
 
   if (find_bond(new_bond)) {
+  // utils::logmesg(lmp,"found new bond already {}, {}\n",a,d);
+
     return false;
     std::cout << "Trying to remove {" << b << ", "<< c << "}"
               << "and add {"<< a << ","<<d<<"}"
@@ -1111,7 +1095,10 @@ bool FixFluidizeMesh::check_candidacy(dihedral_type dihedral){
   }
 
   // also keep anything from getting above 10 bonds.. thats absurd
-  if (_connectivity[a]>8 || _connectivity[d]>8) return false;
+  if (_connectivity[a]>8 || _connectivity[d]>8) {
+    return false;
+    }
+
 
   return check_bond_length({a,d});
 }
