@@ -52,6 +52,7 @@ class BondPowerHarmonic : public Bond {
 
  protected:
   double *k;
+  double *k_harmonic;
   double *lmin;
   double *lmax;
   int *r;

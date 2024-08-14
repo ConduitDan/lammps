@@ -1076,7 +1076,7 @@ bool FixFluidizeMesh::check_candidacy(dihedral_type dihedral){
 
   
   bond_type new_bond = {a, d};\
-  // if (_connectivity[b]<5||_connectivity[c]<5) return false;
+  if (_connectivity[b]<5||_connectivity[c]<5) return false;
 
   if (find_bond(new_bond)) {
   // utils::logmesg(lmp,"found new bond already {}, {}\n",a,d);

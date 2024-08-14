@@ -40,6 +40,7 @@ using namespace LAMMPS_NS;
 BondPowerHarmonic::BondPowerHarmonic(LAMMPS *lmp)
   : Bond(lmp),
   k{nullptr},
+  k_harmonic{nullptr},
   lmin{nullptr},
   lmax{nullptr},
   r{nullptr}
@@ -52,6 +53,7 @@ BondPowerHarmonic::~BondPowerHarmonic()
   if (allocated && !copymode) {
     memory->destroy(setflag);
     memory->destroy(k);
+    memory->destroy(k_harmonic);
     memory->destroy(lmin);
     memory->destroy(lmax);
     memory->destroy(r);
@@ -125,8 +127,8 @@ void BondPowerHarmonic::compute(int eflag, int vflag)
         ebond += u;
       }
     }
-    ebond+=0.5*k[type]*(l-equilibrium_distance(type))*(l-equilibrium_distance(type));
-    fbond+=-k[type]*(l-equilibrium_distance(type))/l;
+    ebond+=0.5*k_harmonic[type]*(l-equilibrium_distance(type))*(l-equilibrium_distance(type));
+    fbond+=-k_harmonic[type]*(l-equilibrium_distance(type))/l;
 
     // apply force to each of 2 atoms
     if (newton_bond || i1 < nlocal) {
@@ -153,6 +155,7 @@ void BondPowerHarmonic::allocate()
   int n = atom->nbondtypes;
 
   memory->create(k,n+1,"bond:k");
+  memory->create(k_harmonic,n+1,"bond:k_harmonic");
   memory->create(lmin,n+1,"bond:lmin");
   memory->create(lmax,n+1,"bond:lmax");
   memory->create(r,n+1,"bond:r");
@@ -167,20 +170,22 @@ void BondPowerHarmonic::allocate()
 
 void BondPowerHarmonic::coeff(int narg, char **arg)
 {
-  if (narg != 5) error->all(FLERR,"Incorrect args for bond coefficients");
+  if (narg != 6) error->all(FLERR,"Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo,ihi;
   utils::bounds(FLERR,arg[0],1,atom->nbondtypes,ilo,ihi,error);
 
   double k_one = utils::numeric(FLERR,arg[1],false,lmp);
-  double lmin_one = utils::numeric(FLERR,arg[2],false,lmp);
-  double lmax_one = utils::numeric(FLERR,arg[3],false,lmp);
-  double r_one = utils::numeric(FLERR,arg[4],false,lmp);
+  double k_harmonic_one = utils::numeric(FLERR,arg[2],false,lmp);
+  double lmin_one = utils::numeric(FLERR,arg[3],false,lmp);
+  double lmax_one = utils::numeric(FLERR,arg[4],false,lmp);
+  double r_one = utils::numeric(FLERR,arg[5],false,lmp);
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
     k[i] = k_one;
+    k_harmonic[i] = k_harmonic_one;
     lmin[i] = lmin_one;
     lmax[i] = lmax_one;
     r[i] = r_one;
@@ -238,11 +243,13 @@ void BondPowerHarmonic::read_restart(FILE *fp)
 
   if (comm->me == 0) {
     utils::sfread(FLERR,&k[1],sizeof(double),atom->nbondtypes,fp,nullptr,error);
+    utils::sfread(FLERR,&k_harmonic[1],sizeof(double),atom->nbondtypes,fp,nullptr,error);
     utils::sfread(FLERR,&lmin[1],sizeof(double),atom->nbondtypes,fp,nullptr,error);
     utils::sfread(FLERR,&lmax[1],sizeof(double),atom->nbondtypes,fp,nullptr,error);
     utils::sfread(FLERR,&r[1],sizeof(int),atom->nbondtypes,fp,nullptr,error);
   }
   MPI_Bcast(&k[1],atom->nbondtypes,MPI_DOUBLE,0,world);
+  MPI_Bcast(&k_harmonic[1],atom->nbondtypes,MPI_DOUBLE,0,world);
   MPI_Bcast(&lmin[1],atom->nbondtypes,MPI_DOUBLE,0,world);
   MPI_Bcast(&lmax[1],atom->nbondtypes,MPI_DOUBLE,0,world);
   MPI_Bcast(&r[1],atom->nbondtypes,MPI_INT,0,world);
@@ -295,8 +302,8 @@ double BondPowerHarmonic::single(int type, double rsq, int /*i*/, int /*j*/,
       fforce -= k[type]*std::pow(l-lc0,r_0-1)*std::pow(r_0,2+r_0)/l;
 
     }
-  eng+=0.5*k[type]*(l-equilibrium_distance(type))*(l-equilibrium_distance(type));
-  fforce+=-k[type]*(l-equilibrium_distance(type))/l;
+  eng+=0.5*k_harmonic[type]*(l-equilibrium_distance(type))*(l-equilibrium_distance(type));
+  fforce+=-k_harmonic[type]*(l-equilibrium_distance(type))/l;
   return eng;
 }
 
@@ -306,6 +313,7 @@ void *BondPowerHarmonic::extract(const char *str, int &dim)
 {
   dim = 1;
   if (strcmp(str,"k")==0) return (void*) k;
+  if (strcmp(str,"k_harmonic")==0) return (void*) k_harmonic;
   if (strcmp(str,"lmin")==0) return (void*) lmin;
   if (strcmp(str,"lmax")==0) return (void*) lmax;
   if (strcmp(str,"r")==0) return (void*) r;
